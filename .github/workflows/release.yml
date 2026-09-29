@@ -1,0 +1,27 @@
+# When the version in extension/manifest.json goes up, GitHub builds the download and publishes the release.
+# So a new Crosspost can ship from any device: change the code, bump the version, push. No Mac needed.
+name: Release
+on:
+  push:
+    branches: [main]
+    paths: [extension/manifest.json]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and publish the download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(jq -r .version extension/manifest.json)
+          if gh release view "v$V" >/dev/null 2>&1; then echo "v$V is already released"; exit 0; fi
+          # last safety net: nothing that looks like a key ships in the download
+          if grep -rIlE "(sk-ant-[A-Za-z0-9_-]{10,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AIza[0-9A-Za-z_-]{30,}|-----BEGIN [A-Z ]*PRIVATE KEY)" extension; then echo "Stopped: something looks like a key"; exit 1; fi
+          mkdir -p out/crosspost && cp -R extension/. out/crosspost/
+          (cd out && zip -qr -X "../crosspost-v$V.zip" crosspost)
+          gh release create "v$V" "crosspost-v$V.zip" --title "Crosspost $V" --latest \
+            --notes "Download crosspost-v$V.zip, unzip it, then in chrome://extensions turn on Developer mode, click Load unpacked and pick the crosspost folder. Already installed? Unzip over your old folder and click the reload arrow on the Crosspost card."
