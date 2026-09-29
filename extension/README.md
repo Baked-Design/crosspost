@@ -45,11 +45,12 @@ Every post of yours on x.com (profile, timeline, post pages) gets a small Linked
 
 ## Focus mode (v1.5)
 Click the extension icon. You see one post at a time, your best unposted one first.
-- **Q** queue it into the next free slot · **S** skip · **E** edit with the LinkedIn preview · **← →** browse
+- **Q** queue it into the next open slot (the button shows exactly when, like "Tomorrow 9:14am") · **S** skip · **E** edit with the LinkedIn preview · **← →** browse
 - **⌘K** (or /) search posts and run anything: import, schedule, settings, browse all posts
 - **1 / 2 / 3 / 4** Review / Queue / Calendar / Posted. The icon bar at the bottom does the same.
 - **Calendar:** month view of posted, scheduled and suggested posts, with a weekly count against your target. Empty slots get a suggested post from your imports; click + to schedule it.
-- **Queue:** open slots show a suggested post too. Add, Edit, or × for a different suggestion.
+- **Queue:** open slots show a suggested post too. Add, Edit, or × for a different suggestion. Every queued post has **Move** (next open slot, or pick a time) and **Unqueue** (it goes back to Review). Drag a post onto another slot to move it, or onto another post to swap them.
+- **Calendar drag:** drag a scheduled post onto another day (keeps its time), an open slot, or another post (swap).
 - The top line shows your week: week of the 12-week run, posts this week, how far the queue covers you.
 
 ## Smart suggestions (v1.8)
@@ -68,7 +69,7 @@ Click the extension icon to open it.
 - Sort by most liked or most viewed to find your best old posts. Threads are merged automatically.
 - Click a post to edit the LinkedIn version, rewrite with Claude, then **Post now**, **Add to queue** (next free slot) or **Schedule** a specific time.
 - Select several posts and **Add to queue** to fill your slots in one go.
-- **Queue tab:** set posting times and days, reschedule or remove items.
+- **Queue tab → Schedule:** pick your days, how many posts a day (1 to 4) and your time windows, like `09:00-11:00, 20:00-23:00`. A window posts once at a natural minute inside it (9:17, 8:23pm). A single time like `21:05` posts exactly then.
 - Scheduled posts go out while Chrome is open. If Chrome was closed at the scheduled time, they go out one a minute when it opens again. You get a notification either way.
 
 ## Visuals on LinkedIn (v1.3)
@@ -84,7 +85,7 @@ In the dashboard editor, quick checks run as you type: line 1 fits the mobile pr
 **Use playbook style** in Settings resets the rewrite instructions to the playbook version (hook, sub-hook, wide spacing, never invent numbers).
 
 ## Rhythm (v1.3)
-The Queue tab has a 12-week run tracker: posts this week vs your target (3 by default), streak, a 12-week grid, and how far your queue covers you. Default slots are Mon/Wed/Fri at 9:00.
+The Queue tab has a 12-week run tracker: posts this week vs your target, streak, a 12-week grid, and how far your queue covers you. Default: one post a day, Monday to Friday, somewhere between 9 and 11am. The weekly goal follows your schedule.
 
 ## Optional: Claude rewrite
 Turn on **Rewrite with Claude** and paste an Anthropic API key (console.anthropic.com). It rewrites each post for LinkedIn using your instructions (default: your voice, no em dashes, @handles into names, threads merged). You still see the rewrite in the preview before it posts. If the rewrite fails, it falls back to the original text.

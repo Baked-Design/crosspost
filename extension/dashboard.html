@@ -73,10 +73,13 @@
           <div class="pop-sep"></div>
           <label class="lbl">Days</label>
           <div class="days" id="slotDays"></div>
-          <div class="two-col">
-            <div><label class="lbl" for="slotTimes">Times</label><input class="input" id="slotTimes" placeholder="09:00, 17:30"></div>
-            <div><label class="lbl" for="ppw">Per week</label><select class="input" id="ppw"><option>2</option><option>3</option><option>4</option><option>5</option><option>7</option></select></div>
-          </div>
+          <label class="lbl">Posts a day</label>
+          <div class="seg" id="perDay"><button data-n="1">1</button><button data-n="2">2</button><button data-n="3">3</button><button data-n="4">4</button></div>
+          <label class="lbl" for="slotTimes">Times</label>
+          <input class="input" id="slotTimes" placeholder="09:00-11:00, 20:00-23:00" spellcheck="false">
+          <p class="fine">One post per time. A range like 20:00-23:00 picks a minute inside it. A single time like 9:17 posts right then.</p>
+          <label class="opt inline sched-nat"><input type="checkbox" id="slotNatural"><span>Natural times (9:17, 8:23pm), not on the hour</span></label>
+          <p class="fine total"><b id="perWeekTxt"></b> · the weekly goal follows this</p>
         </div>
       </div>
     </div>
@@ -266,6 +269,7 @@
 
   <div class="m-foot">
     <button class="btn ghost" id="cMark">Mark as posted</button>
+    <button class="btn ghost danger" id="cUnqueue" hidden><i data-i="x"></i>Unqueue</button>
     <span class="grow"></span>
     <span class="slot-hint" id="cSlotHint"></span>
     <button class="btn" id="cQueue"><i data-i="queue"></i>Add to queue</button>
@@ -285,6 +289,7 @@
 
 <script src="icons.js"></script>
 <script src="parse.js"></script>
+<script src="slots.js"></script>
 <script src="dashboard.js"></script>
 </body>
 </html>

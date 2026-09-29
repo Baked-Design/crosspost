@@ -234,3 +234,25 @@
   .bulk { left: 50%; }
   .modal { inset: 0; border-radius: 0; }
 }
+
+/* schedule: posts a day, natural times */
+.seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.seg button { height: 30px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--muted); font: 600 12px var(--sans, inherit); cursor: pointer; }
+.seg button:hover { border-color: var(--subtle); color: var(--text); }
+.seg button.on { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
+.sched-pop .fine { margin: 6px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
+.sched-pop .fine.total { margin-top: 10px; }
+.sched-nat { margin-top: 10px; font-size: 12.5px; }
+
+/* queued posts: move, unqueue, drag */
+.qcard { overflow: visible; }
+.qcard-b { border-radius: var(--r-lg) var(--r-lg) 0 0; overflow: hidden; }
+.qcard-f { border-radius: 0 0 var(--r-lg) var(--r-lg); }
+.qcard[draggable="true"] { cursor: grab; }
+.qcard[draggable="true"]:active { cursor: grabbing; }
+.move-pop { right: 0; }
+.opt-btn { display: block; width: 100%; text-align: left; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--text); font: 500 12.5px inherit; cursor: pointer; margin-bottom: 10px; }
+.opt-btn:hover { background: var(--hover); }
+body.dragging .slot-open, body.dragging .chip.open, body.dragging .cal-day:not(.past) { outline: 1px dashed var(--subtle); outline-offset: 2px; }
+.drop-on, body.dragging .drop-on { outline: 2px solid var(--primary) !important; outline-offset: 2px; background: var(--hover); }
+.chip[draggable="true"] { cursor: grab; }

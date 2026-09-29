@@ -1,6 +1,6 @@
 // X to LinkedIn Crosspost: background service worker
 // Handles LinkedIn OAuth, the optional Claude rewrite, image upload and posting.
-importScripts("card.js");
+importScripts("card.js", "slots.js");
 
 const PLAYBOOK_INSTRUCTIONS =
   "Rewrite this X post as a LinkedIn post in my voice: casual, direct, plain words, no corporate fluff, no jargon.\n" +
@@ -35,8 +35,10 @@ const DEFAULTS = {
   screenWithClaude: true, // if an Anthropic key is set, let Claude judge unclear posts
   personalLive: "ask", // live crosspost of a personal-looking X post: "ask" | "skip" | "post"
   myHandle: "", // auto-detected from x.com
-  slotTimes: "09:00", // comma separated, local time, used by "Add to queue"
-  slotDays: [1, 3, 5] // 0 = Sun ... 6 = Sat  (Mon/Wed/Fri)
+  slotTimes: "09:00-11:00", // windows or exact times, local, comma separated. One post per window per day.
+  slotDays: [1, 2, 3, 4, 5], // 0 = Sun ... 6 = Sat
+  slotNatural: true, // windows post at a natural minute (9:17), not on the hour
+  slotSeed: "" // per-install salt so everyone's natural minutes differ
 };
 
 const HISTORY_MAX = 1000;
@@ -355,38 +357,11 @@ async function getStore() {
   return { xposts, liStatus, queue };
 }
 
-function parseSlotTimes(str) {
-  return String(str || "09:00")
-    .split(/[,\s]+/)
-    .map(t => t.match(/^(\d{1,2}):(\d{2})$/))
-    .filter(Boolean)
-    .map(m => [+m[1], +m[2]])
-    .filter(([h, m]) => h < 24 && m < 60)
-    .sort((a, b) => a[0] * 60 + a[1] - (b[0] * 60 + b[1]));
-}
-
-function nextFreeSlots(n, taken, s) {
-  const times = parseSlotTimes(s.slotTimes);
-  const days = new Set((s.slotDays && s.slotDays.length ? s.slotDays : [0, 1, 2, 3, 4, 5, 6]).map(Number));
-  if (!times.length) throw new Error("Set at least one posting time in the Queue tab.");
-  const takenMin = new Set([...taken].map(t => Math.floor(t / 60000)));
-  const out = [];
-  const now = Date.now() + 60_000;
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  for (let i = 0; i < 730 && out.length < n; i++) {
-    if (days.has(d.getDay())) {
-      for (const [h, m] of times) {
-        const ts = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, m).getTime();
-        if (ts > now && !takenMin.has(Math.floor(ts / 60000))) {
-          out.push(ts);
-          takenMin.add(Math.floor(ts / 60000));
-          if (out.length >= n) break;
-        }
-      }
-    }
-    d.setDate(d.getDate() + 1);
-  }
+// the next n open slots, skipping any window that already has something queued
+function nextFreeSlots(n, queue, s) {
+  if (!XLISlots.valid(s.slotTimes)) throw new Error("Set your posting times in Queue → Schedule.");
+  const out = XLISlots.upcoming(s, queue, n).map(x => x.at);
+  if (out.length < n) throw new Error("No open slots in the next two years. Add days or times in Queue → Schedule.");
   return out;
 }
 
@@ -707,7 +682,7 @@ const handlers = {
       const ids = new Set(items.map(i => i.tweetId));
       const rest = queue.filter(q => !ids.has(q.tweetId)); // re-queueing replaces
       const needSlots = items.filter(i => !i.at).length;
-      const slots = needSlots ? nextFreeSlots(needSlots, rest.map(q => q.at), s) : [];
+      const slots = needSlots ? nextFreeSlots(needSlots, rest, s) : [];
       const added = items.map(i => ({
         qid: crypto.randomUUID(),
         tweetId: i.tweetId,
@@ -739,6 +714,46 @@ const handlers = {
       await chrome.storage.local.set({ queue: queue.filter(q => q.qid !== qid) });
       return { ok: true };
     });
+  },
+  // drag one queued post onto another: they trade times
+  async swapQueueItems({ a, b }) {
+    return withLock(async () => {
+      const { queue } = await getStore();
+      const x = queue.find(q => q.qid === a);
+      const y = queue.find(q => q.qid === b);
+      if (!x || !y) throw new Error("Queue item not found");
+      [x.at, y.at] = [y.at, x.at];
+      for (const q of [x, y]) Object.assign(q, { status: "scheduled", error: undefined });
+      await chrome.storage.local.set({ queue: queue.sort((m, n) => m.at - n.at) });
+      return { ok: true };
+    });
+  },
+  // move a queued post to the next open slot after its current time
+  async bumpQueueItem({ qid }) {
+    return withLock(async () => {
+      const s = await getSettings();
+      const { queue } = await getStore();
+      const q = queue.find(x => x.qid === qid);
+      if (!q) throw new Error("Queue item not found");
+      const [next] = XLISlots.upcoming(s, queue.filter(x => x.qid !== qid), 1, Math.max(q.at, Date.now()) + 60000);
+      if (!next) throw new Error("No open slot after this one.");
+      Object.assign(q, { at: next.at, status: "scheduled", error: undefined });
+      await chrome.storage.local.set({ queue: queue.sort((m, n) => m.at - n.at) });
+      return q;
+    });
+  },
+  async setSchedule({ slotTimes, slotDays, slotNatural }) {
+    const patch = {};
+    if (slotTimes !== undefined) {
+      if (!XLISlots.valid(slotTimes)) throw new Error("Use times like 09:00-11:00, 20:00-23:00 or 9:17");
+      patch.slotTimes = slotTimes;
+    }
+    if (slotDays !== undefined) patch.slotDays = slotDays.map(Number).filter(d => d >= 0 && d <= 6);
+    if (slotNatural !== undefined) patch.slotNatural = !!slotNatural;
+    const s = { ...(await getSettings()), ...patch };
+    patch.postsPerWeek = Math.max(1, XLISlots.perWeek(s)); // the weekly goal follows the schedule
+    await chrome.storage.local.set(patch);
+    return { ...s, ...patch };
   },
   async markPosted({ tweetId, posted }) {
     const { liStatus = {} } = await chrome.storage.local.get("liStatus");
@@ -884,6 +899,21 @@ async function migrateQueuedVisuals() {
   return changed;
 }
 withLock(migrateQueuedVisuals).catch(() => {});
+
+// schedule setup: a per-install salt, and v1.8 "09:00 Mon/Wed/Fri" becomes a morning window
+async function migrateSchedule() {
+  const st = await chrome.storage.local.get(["slotSeed", "slotTimes", "schedV"]);
+  const patch = {};
+  if (!st.slotSeed) patch.slotSeed = crypto.randomUUID().slice(0, 8);
+  if (!st.schedV) {
+    patch.schedV = 2;
+    if (!st.slotTimes || st.slotTimes === "09:00") patch.slotTimes = XLISlots.DEFAULT_TIMES;
+    const cur = await getSettings();
+    patch.postsPerWeek = Math.max(1, XLISlots.perWeek({ ...cur, ...patch })); // the weekly goal now follows the schedule
+  }
+  if (Object.keys(patch).length) await chrome.storage.local.set(patch);
+}
+migrateSchedule().catch(() => {});
 
 chrome.runtime.onInstalled.addListener(({ reason }) => {
   if (reason === "install") chrome.runtime.openOptionsPage();

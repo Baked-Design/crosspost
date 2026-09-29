@@ -97,14 +97,7 @@ function statusPill(id) {
   if (s?.state === "failed") return `<span class="pill bad">${icon("alert")}Failed</span>`;
   return "";
 }
-function shortWhen(ts) {
-  const d = new Date(ts);
-  const today = new Date();
-  const tmr = new Date(Date.now() + 864e5);
-  const same = (a, b) => a.toDateString() === b.toDateString();
-  const day = same(d, today) ? "Today" : same(d, tmr) ? "Tomorrow" : d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-  return `${day}, ${fmtTime(ts)}`;
-}
+const shortWhen = ts => XLISlots.label(ts); // "Today 9:17pm", "Tomorrow 9:04am", "Sun, Oct 4 · 9:17am"
 
 // ---------- data ----------
 async function load() {
@@ -244,16 +237,9 @@ async function autoScreen(force) {
   }
 }
 
-function slotLabel(ts) {
-  const d = new Date(ts);
-  const today = new Date().toDateString();
-  const tmr = new Date(Date.now() + 864e5).toDateString();
-  const day = d.toDateString() === today ? "today" : d.toDateString() === tmr ? "tomorrow" : d.toLocaleDateString(undefined, { weekday: "short" });
-  return `${day} ${fmtTime(ts).replace(":00", "").replace(" ", "").toLowerCase()}`;
-}
 function nextSlotAt() {
-  const taken = new Set(state.queue.map(q => Math.floor(q.at / 60000)));
-  return upcomingSlots(60).find(t => !taken.has(Math.floor(t / 60000)));
+  const [n] = XLISlots.upcoming(state.settings, state.queue, 1);
+  return n && n.at;
 }
 
 function renderReview(anim) {
@@ -296,7 +282,7 @@ function renderReview(anim) {
   $("rvMedia").className = "rv-media n" + imgs.length;
   $("rvMedia").innerHTML = imgs.map(u => `<img src="${esc(bigImg(u))}" alt="" loading="lazy">`).join("");
   const at = nextSlotAt();
-  $("rvQueueLbl").textContent = at ? `Queue for ${slotLabel(at)}` : "Queue";
+  $("rvQueueLbl").textContent = at ? `Queue · ${shortWhen(at)}` : "Queue";
   $("rvHint").innerHTML = `<kbd>←</kbd><kbd>→</kbd> browse <span class="sep"></span> <kbd>⌘K</kbd> everything else`;
   const card = $("rvCard");
   card.className = "rv-card";
@@ -710,49 +696,15 @@ $("archiveFile").onchange = async e => {
 };
 
 // ---------- queue ----------
-function parseTimes(str) {
-  return String(str || "09:00")
-    .split(/[,\s]+/)
-    .map(t => t.match(/^(\d{1,2}):(\d{2})$/))
-    .filter(Boolean)
-    .map(m => [+m[1], +m[2]])
-    .filter(([h, m]) => h < 24 && m < 60)
-    .sort((a, b) => a[0] * 60 + a[1] - (b[0] * 60 + b[1]));
-}
-
-function upcomingSlots(days = 14) {
-  const times = parseTimes(state.settings.slotTimes);
-  const dset = new Set((state.settings.slotDays || []).map(Number));
-  const out = [];
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  for (let i = 0; i < days; i++) {
-    if (dset.has(d.getDay())) for (const [h, m] of times) {
-      const ts = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, m).getTime();
-      if (ts > Date.now() + 60_000) out.push(ts);
-    }
-    d.setDate(d.getDate() + 1);
-  }
-  return out;
-}
-
-function slotsBetween(a, b) {
-  const times = parseTimes(state.settings.slotTimes);
-  const dset = new Set((state.settings.slotDays || []).map(Number));
-  const out = [];
-  const d = new Date(a);
-  d.setHours(0, 0, 0, 0);
-  while (d.getTime() < b) {
-    if (dset.has(d.getDay())) for (const [h, m] of times) out.push(new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, m).getTime());
-    d.setDate(d.getDate() + 1);
-  }
-  return out;
+// open slots from now on (objects from XLISlots: {at, dayStart, w, s, e})
+function openSlots(days = 14) {
+  const now = Date.now() + 60_000;
+  return XLISlots.between(now, now + days * 864e5, state.settings).filter(sl => !XLISlots.taken(sl, state.queue));
 }
 
 // Map each upcoming open slot to a suggested imported-but-unposted post (best first, no repeats).
 function suggestions(days = 70) {
-  const taken = new Set(state.queue.map(q => Math.floor(q.at / 60000)));
-  const open = upcomingSlots(days).filter(t => !taken.has(Math.floor(t / 60000)));
+  const open = openSlots(days).map(sl => sl.at);
   const pool = reviewList();
   const map = new Map();
   open.forEach((t, i) => pool[i] && map.set(t, pool[i]));
@@ -784,17 +736,13 @@ function renderQueue() {
   renderRhythm();
   renderSchedule();
 
-  const minute = t => Math.floor(t / 60000);
   const items = [...state.queue].sort((a, b) => a.at - b.at);
-  const taken = new Set(items.map(q => minute(q.at)));
-  const entries = [...items.map(q => ({ at: q.at, q })), ...upcomingSlots().filter(t => !taken.has(minute(t))).map(t => ({ at: t, empty: true }))].sort(
-    (a, b) => a.at - b.at
-  );
+  const entries = [...items.map(q => ({ at: q.at, q })), ...openSlots().map(sl => ({ at: sl.at, empty: true }))].sort((a, b) => a.at - b.at);
 
   const list = $("queueList");
   list.innerHTML = "";
   if (!entries.length) {
-    list.innerHTML = `<div class="calm" style="padding-top:12vh"><h2>Nothing scheduled</h2><p>Open Schedule to pick posting days, then queue posts from Review.</p></div>`;
+    list.innerHTML = `<div class="calm" style="padding-top:12vh"><h2>Nothing scheduled</h2><p>Open Schedule to pick your days and times, then queue posts from Review.</p></div>`;
     return;
   }
   let lastDay = "";
@@ -813,9 +761,12 @@ function renderQueue() {
     }
     const row = document.createElement("div");
     row.className = "slot";
+    row.dataset.at = e.at;
+    if (e.q) row.dataset.qid = e.q.qid;
     row.innerHTML = `<div class="slot-t">${fmtTime(e.at)}</div>`;
     row.appendChild(e.empty ? emptySlot(e.at) : queueCard(e.q));
     list.appendChild(row);
+    dropTarget(row, () => ({ at: e.at, qid: e.q && e.q.qid }));
   }
 }
 
@@ -866,17 +817,52 @@ function queueCard(q) {
     <div class="qcard-f">
       <div class="meta">${q.status === "failed" ? `<span class="pill bad">${icon("alert")}Failed</span>` : q.status === "posting" ? `<span class="pill sched">Posting…</span>` : ""}<span class="tag">${visLabel}</span></div>
       ${p ? `<button class="btn sm ghost" data-a="edit">${icon("pencil")}Edit</button>` : ""}
+      <div class="pop-wrap">
+        <button class="btn sm ghost" data-a="move">${icon("clock")}Move</button>
+        <div class="pop up move-pop" hidden>
+          <button class="opt-btn" data-m="next">Next open slot</button>
+          <label class="lbl">Or pick a time</label>
+          <input class="input" type="datetime-local" data-m="at">
+          <button class="btn sm primary block" data-m="set">Move here</button>
+        </div>
+      </div>
       <button class="btn sm ghost" data-a="now">${icon("send")}Post now</button>
-      <button class="icon-btn danger" data-a="rm" title="Remove from queue">${icon("trash")}</button>
+      <button class="btn sm ghost danger" data-a="rm" title="Take it out of the queue. It goes back to Review.">${icon("x")}Unqueue</button>
     </div>`;
+  el.draggable = true;
+  el.title = "Drag onto another slot to move it";
+  el.addEventListener("dragstart", ev => {
+    ev.dataTransfer.setData("text/xli-qid", q.qid);
+    ev.dataTransfer.effectAllowed = "move";
+    document.body.classList.add("dragging");
+  });
+  el.addEventListener("dragend", () => document.body.classList.remove("dragging"));
+  const pop = el.querySelector(".move-pop");
+  el.querySelector('[data-a="move"]').onclick = ev => {
+    ev.stopPropagation();
+    document.querySelectorAll(".move-pop").forEach(x => x !== pop && (x.hidden = true));
+    pop.querySelector('[data-m="at"]').value = toLocalInput(q.at);
+    pop.hidden = !pop.hidden;
+  };
+  pop.addEventListener("click", ev => ev.stopPropagation());
+  pop.querySelector('[data-m="next"]').onclick = async () => {
+    try {
+      const r = await send({ type: "bumpQueueItem", qid: q.qid });
+      toast(`Moved to ${shortWhen(r.at)}`);
+    } catch (err) {
+      toast(err.message);
+    }
+    load();
+  };
+  pop.querySelector('[data-m="set"]').onclick = async () => {
+    const at = new Date(pop.querySelector('[data-m="at"]').value).getTime();
+    if (!at || at < Date.now() + 30_000) return toast("Pick a time in the future.");
+    await moveQueued(q.qid, at);
+  };
   if (q.visual === "card" && q.cardData) {
     send({ type: "renderCard", cardData: q.cardData }).then(r => (el.querySelector("[data-card]").src = r.dataUrl)).catch(() => {});
   }
-  el.querySelector('[data-a="rm"]').onclick = async () => {
-    await send({ type: "removeQueueItem", qid: q.qid });
-    toast("Removed from queue");
-    load();
-  };
+  el.querySelector('[data-a="rm"]').onclick = () => unqueue(q);
   el.querySelector('[data-a="now"]').onclick = async e => {
     const b = e.currentTarget;
     b.disabled = true;
@@ -894,11 +880,73 @@ function queueCard(q) {
   return el;
 }
 
+// take a post out of the queue (it shows up in Review again), with undo
+async function unqueue(q) {
+  await send({ type: "removeQueueItem", qid: q.qid });
+  await load();
+  toastUndo("Unqueued. It's back in Review.", async () => {
+    await send({ type: "enqueue", items: [{ tweetId: q.tweetId, text: q.text, images: q.images, visual: q.visual, cardData: q.cardData, at: q.at }] });
+    await load();
+  });
+}
+async function moveQueued(qid, at) {
+  const q = state.queue.find(x => x.qid === qid);
+  const from = q && q.at;
+  try {
+    await send({ type: "updateQueueItem", qid, patch: { at } });
+    await load();
+    toastUndo(`Moved to ${shortWhen(at)}`, from ? async () => {
+      await send({ type: "updateQueueItem", qid, patch: { at: from } });
+      await load();
+    } : null);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+// something you can drop a queued post on. target() -> {at, qid?}: a slot time, or another post to trade places with
+let dragQid = null;
+document.addEventListener("dragstart", ev => {
+  const el = ev.target.closest && ev.target.closest("[data-qid]");
+  dragQid = el ? el.dataset.qid : null;
+});
+document.addEventListener("dragend", () => {
+  dragQid = null;
+  document.querySelectorAll(".drop-on").forEach(x => x.classList.remove("drop-on"));
+});
+function dropTarget(el, target) {
+  el.addEventListener("dragover", ev => {
+    if (!ev.dataTransfer.types.includes("text/xli-qid")) return;
+    const t = target();
+    if (!t || (!t.qid && t.at < Date.now() + 60_000)) return;
+    ev.preventDefault();
+    ev.stopPropagation(); // the innermost target wins (a slot inside a calendar day)
+    el.classList.add("drop-on");
+  });
+  el.addEventListener("dragleave", () => el.classList.remove("drop-on"));
+  el.addEventListener("drop", async ev => {
+    el.classList.remove("drop-on");
+    const qid = ev.dataTransfer.getData("text/xli-qid");
+    const t = target();
+    if (!qid || !t) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (t.qid === qid) return;
+    if (t.qid) {
+      await send({ type: "swapQueueItems", a: qid, b: t.qid });
+      await load();
+      toastUndo("Swapped", async () => {
+        await send({ type: "swapQueueItems", a: qid, b: t.qid });
+        await load();
+      });
+    } else await moveQueued(qid, t.at);
+  });
+}
+document.addEventListener("click", () => document.querySelectorAll(".move-pop").forEach(x => (x.hidden = true)));
+
 function renderRhythm() {
   const r = state.rhythm;
   if (!r) return;
   const short = d => new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  $("ppw").value = String(r.target);
   $("rWeek").textContent = `${r.thisWeek.posted}/${r.target}`;
   $("rStreak").textContent = r.streak;
   $("rUntil").textContent = r.queueUntil ? short(r.queueUntil) : "–";
@@ -922,7 +970,10 @@ function renderRhythm() {
 
 function renderSchedule() {
   const s = state.settings;
-  if (document.activeElement !== $("slotTimes")) $("slotTimes").value = s.slotTimes || "09:00";
+  const wins = XLISlots.parse(s.slotTimes) || [];
+  if (document.activeElement !== $("slotTimes")) $("slotTimes").value = s.slotTimes || XLISlots.DEFAULT_TIMES;
+  $("perDay").querySelectorAll("button").forEach(b => b.classList.toggle("on", +b.dataset.n === wins.length));
+  $("slotNatural").checked = s.slotNatural !== false;
   const days = new Set((s.slotDays || []).map(Number));
   $("slotDays").innerHTML = "";
   for (const d of [1, 2, 3, 4, 5, 6, 0]) {
@@ -930,29 +981,33 @@ function renderSchedule() {
     b.className = "day" + (days.has(d) ? " on" : "");
     b.textContent = DAY[d].slice(0, 2);
     b.title = DAY[d];
-    b.onclick = async () => {
+    b.onclick = () => {
       days.has(d) ? days.delete(d) : days.add(d);
-      state.settings.slotDays = [...days];
-      await chrome.storage.local.set({ slotDays: [...days] });
-      renderQueue();
+      saveSchedule({ slotDays: [...days] });
     };
     $("slotDays").appendChild(b);
   }
+  const n = XLISlots.perWeek(s);
+  $("perWeekTxt").textContent = `${n} post${n === 1 ? "" : "s"} a week`;
 }
-$("slotTimes").addEventListener("change", async e => {
-  const v = e.target.value.trim();
-  if (!/^\s*\d{1,2}:\d{2}(\s*,\s*\d{1,2}:\d{2})*\s*$/.test(v)) return toast("Use 24h times like 09:00, 17:30");
-  state.settings.slotTimes = v;
-  await chrome.storage.local.set({ slotTimes: v });
-  toast("Posting times saved");
-  renderQueue();
+async function saveSchedule(patch, note) {
+  try {
+    state.settings = await send({ type: "setSchedule", ...patch });
+    if (note) toast(note);
+    await renderStatusLine();
+    state.rhythm = await send({ type: "rhythm" }).catch(() => state.rhythm);
+    renderQueue();
+  } catch (e) {
+    toast(e.message);
+    renderSchedule();
+  }
+}
+$("perDay").addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (b) saveSchedule({ slotTimes: XLISlots.PRESETS[b.dataset.n] }, `${b.dataset.n} a day`);
 });
-$("ppw").addEventListener("change", async e => {
-  await chrome.storage.local.set({ postsPerWeek: +e.target.value });
-  state.settings.postsPerWeek = +e.target.value;
-  await renderStatusLine();
-  renderRhythm();
-});
+$("slotTimes").addEventListener("change", e => saveSchedule({ slotTimes: e.target.value.trim() }, "Posting times saved"));
+$("slotNatural").addEventListener("change", e => saveSchedule({ slotNatural: e.target.checked }));
 $("runBtn").onclick = async () => {
   await send({ type: "startRun" });
   await renderStatusLine();
@@ -1009,12 +1064,11 @@ function renderCalendar() {
     byDay.get(k).push({ ...item, at: ts });
   };
   for (const [id, s] of Object.entries(state.liStatus)) if (s.state === "posted" && s.at >= start.getTime() && s.at <= end.getTime()) add(s.at, { kind: "posted", id, text: s.text || state.byId.get(id)?.text || "", url: s.url });
-  for (const q of state.queue) if (q.at >= start.getTime() && q.at <= end.getTime()) add(q.at, { kind: q.status === "failed" ? "failed" : "sched", id: q.tweetId, text: q.text });
+  for (const q of state.queue) if (q.at >= start.getTime() && q.at <= end.getTime()) add(q.at, { kind: q.status === "failed" ? "failed" : "sched", id: q.tweetId, qid: q.qid, text: q.text });
   for (const [t, p] of sugg) if (t >= start.getTime() && t <= end.getTime()) add(t, { kind: "sugg", id: p.id, text: p.text });
   const now = Date.now();
-  const taken = new Set(state.queue.map(q => Math.floor(q.at / 60000)));
-  for (const t of slotsBetween(Math.max(start.getTime(), now), end.getTime() + 1)) {
-    if (t > now + 60000 && !taken.has(Math.floor(t / 60000)) && !sugg.has(t)) add(t, { kind: "open" });
+  for (const sl of XLISlots.between(Math.max(start.getTime(), now + 60000), end.getTime() + 1, state.settings)) {
+    if (!XLISlots.taken(sl, state.queue) && !sugg.has(sl.at)) add(sl.at, { kind: "open" });
   }
 
   // month summary
@@ -1041,13 +1095,13 @@ function renderCalendar() {
       const items = (byDay.get(k) || []).sort((a, b) => a.at - b.at);
       weekCount += items.filter(x => x.kind === "posted" || x.kind === "sched").length;
       const cls = ["cal-day", d.getMonth() !== cal.m ? "out" : "", k === todayKey ? "today" : "", items.length ? "" : "noitems", d.getTime() + 864e5 < now ? "past" : ""].join(" ");
-      html += `<div class="${cls}"><div class="cd-n"><span>${d.getDate()}</span><em>${d.toLocaleDateString(undefined, { weekday: "short" })}</em></div>`;
-      for (const it of items.slice(0, 3)) {
+      html += `<div class="${cls}" data-day="${d.getTime()}"><div class="cd-n"><span>${d.getDate()}</span><em>${d.toLocaleDateString(undefined, { weekday: "short" })}</em></div>`;
+      for (const it of items.slice(0, 4)) {
         const time = fmtTime(it.at).replace(":00", "").replace(" ", "").toLowerCase();
         if (it.kind === "open") html += `<button class="chip open" data-k="open" data-at="${it.at}"><span class="tm">${time}</span><span class="tx">Open slot</span></button>`;
-        else html += `<button class="chip ${it.kind}" data-k="${it.kind}" data-id="${esc(it.id)}" data-at="${it.at}" title="${esc(it.text.slice(0, 200))}"><span class="tm">${time}</span><span class="tx">${esc(it.text.replace(/\s+/g, " ").slice(0, 90))}</span>${it.kind === "sugg" ? `<i class="add" data-add="1">+</i>` : ""}</button>`;
+        else html += `<button class="chip ${it.kind}" data-k="${it.kind}" data-id="${esc(it.id)}" data-at="${it.at}"${it.qid ? ` data-qid="${esc(it.qid)}" draggable="true"` : ""} title="${esc(it.text.slice(0, 200))}"><span class="tm">${time}</span><span class="tx">${esc(it.text.replace(/\s+/g, " ").slice(0, 90))}</span>${it.kind === "sugg" ? `<i class="add" data-add="1">+</i>` : ""}</button>`;
       }
-      if (items.length > 3) html += `<span class="more-n">+${items.length - 3} more</span>`;
+      if (items.length > 4) html += `<span class="more-n">+${items.length - 4} more</span>`;
       html += `</div>`;
       d.setDate(d.getDate() + 1);
     }
@@ -1055,6 +1109,26 @@ function renderCalendar() {
     html += `<div class="cal-wk ${met ? "met" : ""}"><b>${weekCount}</b><span>/${target}</span></div></div>`;
   }
   $("cal").innerHTML = html;
+  // drag a scheduled post: onto an open slot (takes its time), another post (swap), or a day (same time of day)
+  $("cal").querySelectorAll(".chip[data-qid]").forEach(ch =>
+    ch.addEventListener("dragstart", ev => {
+      ev.dataTransfer.setData("text/xli-qid", ch.dataset.qid);
+      ev.dataTransfer.effectAllowed = "move";
+      document.body.classList.add("dragging");
+    })
+  );
+  $("cal").querySelectorAll(".chip").forEach(ch => ch.addEventListener("dragend", () => document.body.classList.remove("dragging")));
+  $("cal").querySelectorAll(".chip.open, .chip[data-qid]").forEach(ch => dropTarget(ch, () => ({ at: +ch.dataset.at, qid: ch.dataset.qid })));
+  $("cal").querySelectorAll(".cal-day").forEach(day =>
+    dropTarget(day, () => {
+      const qid = dragQid;
+      const q = qid && state.queue.find(x => x.qid === qid);
+      if (!q) return { at: +day.dataset.day + 12 * 3600e3 };
+      const t = new Date(q.at);
+      const d = new Date(+day.dataset.day);
+      return { at: new Date(d.getFullYear(), d.getMonth(), d.getDate(), t.getHours(), t.getMinutes()).getTime() };
+    })
+  );
   $("cal").querySelectorAll(".chip").forEach(ch =>
     ch.addEventListener("click", e => {
       const at = +ch.dataset.at;
@@ -1148,6 +1222,7 @@ function renderComposerStatus() {
   const q = queuedFor(id);
   $("cBadge").innerHTML = statusPill(id);
   $("cQueue").lastChild.textContent = q ? "Move to next slot" : "Add to queue";
+  $("cUnqueue").hidden = !q;
   $("cSchedule").textContent = state.fillAt ? `Schedule for ${shortWhen(state.fillAt)}` : q ? "Reschedule" : "Schedule";
   $("cSchedBtn").lastChild.textContent = state.fillAt ? shortWhen(state.fillAt) : "Schedule";
   $("cSchedBtn").classList.toggle("primary", !!state.fillAt);
@@ -1382,10 +1457,26 @@ $("cPost").onclick = e =>
   });
 $("cQueue").onclick = e =>
   busy(e.currentTarget, "Adding…", async () => {
+    const q = queuedFor(state.current);
+    if (q) {
+      // already queued: keep your edits, move it to the next open slot after its current one
+      const { tweetId, ...patch } = payload();
+      await send({ type: "updateQueueItem", qid: q.qid, patch });
+      const r = await send({ type: "bumpQueueItem", qid: q.qid });
+      await load();
+      return msg("ok", `Moved to ${esc(shortWhen(r.at))}.`, true);
+    }
     const r = await send({ type: "enqueue", items: [payload()] });
     await load();
-    msg("ok", `Queued for ${esc(fmtWhen(r.added[0].at))}.`, true);
+    msg("ok", `Queued for ${esc(shortWhen(r.added[0].at))}.`, true);
   });
+$("cUnqueue").onclick = async () => {
+  const q = queuedFor(state.current);
+  if (!q) return;
+  await unqueue(q);
+  renderComposerStatus();
+  msg();
+};
 $("cSchedBtn").onclick = e => {
   e.stopPropagation();
   if (state.fillAt) return $("cSchedule").click();
@@ -1405,7 +1496,7 @@ $("cSchedule").onclick = e =>
       closeComposer();
       go("queue");
       toast(`Scheduled for ${shortWhen(at)}`);
-    } else msg("ok", `Scheduled for ${esc(fmtWhen(at))}.`, true);
+    } else msg("ok", `Scheduled for ${esc(shortWhen(at))}.`, true);
   });
 $("cMark").onclick = async () => {
   await send({ type: "markPosted", tweetId: state.current, posted: !isPosted(state.current) });
@@ -1451,7 +1542,7 @@ document.addEventListener("keydown", e => {
 // live refresh when the background changes things
 let reloadT;
 chrome.storage.onChanged.addListener(ch => {
-  if (ch.xposts || ch.queue || ch.liStatus || ch.auth || ch.history || ch.runStart || ch.xProfile || ch.clientId || ch.slotDays || ch.slotTimes || ch.visualMode) {
+  if (ch.xposts || ch.queue || ch.liStatus || ch.auth || ch.history || ch.runStart || ch.xProfile || ch.clientId || ch.slotDays || ch.slotTimes || ch.slotNatural || ch.visualMode) {
     clearTimeout(reloadT);
     reloadT = setTimeout(load, 400);
   }

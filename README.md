@@ -10,7 +10,8 @@ A free Chrome extension. When you post on X, it sends the same post to LinkedIn,
 
 - **Post once, show up twice.** Post on X like normal. A small preview pops up and the post goes to LinkedIn after a countdown, on your click, or instantly.
 - **Your best old posts.** Import your X history and review your strongest unposted posts one at a time. Queue, skip or edit with one key.
-- **A calendar that fills itself.** Pick your posting days. Empty slots get a suggested post.
+- **A calendar that fills itself.** Pick your days and how many posts a day. Empty slots get a suggested post. Drag posts around to move them.
+- **Natural timing.** Set windows like 9 to 11am and 8 to 11pm. Each post goes out at a real-looking minute (9:17, 8:23pm), not always on the hour.
 - **Smart about personal posts.** Good-morning posts and weekend photos stay off LinkedIn.
 - **Images carry over,** up to 9 per post. Or turn a text post into a clean card image.
 - **Private by default.** No Crosspost server, no account. Your keys stay in your browser.
