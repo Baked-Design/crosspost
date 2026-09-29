@@ -28,8 +28,11 @@
     for (const part of String(str || "").split(",")) {
       if (!part.trim()) continue;
       const [a, b] = part.split(/\s*[-–to]+\s*(?=\d)/);
-      const s = t(a);
+      let s = t(a);
       const e = b === undefined ? s : t(b);
+      // "9-10pm": the am/pm on the end applies to the start too, when that still makes a forward window
+      const suf = b !== undefined && !/(am|pm)\s*$/i.test(a) && (String(b).match(/(am|pm)\s*$/i) || [])[1];
+      if (suf && e != null) { const s2 = t(String(a).trim() + suf); if (s2 != null && s2 <= e) s = s2; }
       if (s == null || e == null || e < s) return null; // bad input: caller shows a hint
       out.push({ s, e });
     }
@@ -81,8 +84,10 @@
   // window counts (so dragging 9:17 to 10:40 keeps the morning slot filled).
   function taken(slot, queue) {
     const pad = slot.e === slot.s ? 30 : 5;
-    const a = slot.dayStart + (slot.s - pad) * 60000;
-    const b = slot.dayStart + (slot.e + pad) * 60000;
+    const d = new Date(slot.dayStart);
+    const at = m => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, m).getTime(); // real clock time, even on daylight-saving days
+    const a = at(slot.s - pad);
+    const b = at(slot.e + pad);
     return queue.some(q => q.at >= a && q.at <= b);
   }
 

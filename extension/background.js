@@ -386,6 +386,7 @@ function recordPosted(tweetId, info) {
   if (!tweetId) return Promise.resolve();
   return recLock(async () => {
     const { liStatus = {} } = await chrome.storage.local.get("liStatus");
+    if (liStatus[tweetId]?.state === "posted" && info.state !== "posted") return; // a later failure never hides that it went out
     liStatus[tweetId] = { ...liStatus[tweetId], ...info };
     await chrome.storage.local.set({ liStatus });
   });
@@ -405,6 +406,7 @@ const release = tweetId => tweetId && inflight.delete(tweetId);
 // a post that was mid-publish when Chrome closed or the extension restarted can't stay
 // "Posting…" forever. We can't know if LinkedIn got it, so it's marked for you to check, never re-sent.
 const STUCK_MS = 5 * 60 * 1000;
+const LATE_MS = 6 * 3600 * 1000;
 async function recoverStuck() {
   await withLock(async () => {
     const { queue } = await getStore();
@@ -436,6 +438,17 @@ async function processQueue() {
         // already went out another way (Post now, the live pop-up) after it was queued: drop it, don't post twice
         await chrome.storage.local.set({ queue: queue.filter(q => q.qid !== due.qid) });
         return null;
+      }
+      if (Date.now() - due.at > LATE_MS) {
+        // missed while Chrome was closed or the Mac was asleep: don't dump a backlog on LinkedIn, move it to the next open slot
+        const s = await getSettings();
+        const [next] = XLISlots.upcoming(s, queue.filter(q => q.qid !== due.qid), 1);
+        if (next) {
+          Object.assign(due, { at: next.at, note: "Moved: Chrome was closed when it was due" });
+          await chrome.storage.local.set({ queue: queue.sort((m, n) => m.at - n.at) });
+          notify("Crosspost moved a missed post", `It was due while Chrome was closed. New time: ${new Date(next.at).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}`);
+          return null;
+        }
       }
       if (!claim(due.tweetId)) return null;
       Object.assign(due, { status: "posting", postingAt: Date.now() });
@@ -612,11 +625,11 @@ const handlers = {
     return json.data.map(m => ({ id: m.id, name: m.display_name || m.id }));
   },
   // Called by the content script after an X post is confirmed sent.
-  async prepare({ text }) {
+  async prepare({ text, rewrite = true }) {
     const s = await getSettings();
     let linkedinText = text;
     let rewriteError = null;
-    if (s.rewriteEnabled) {
+    if (s.rewriteEnabled && rewrite) {
       try {
         linkedinText = await rewriteWithClaude(text, s);
       } catch (e) {
@@ -627,8 +640,12 @@ const handlers = {
   },
   async publish({ text, images, xText, tweetId, visual, cardData }) {
     const { liStatus } = await getStore();
-    if (tweetId && liStatus[tweetId]?.state === "posted") throw new Error("Already on LinkedIn. Open the dashboard if you want to post it again.");
+    const prev = tweetId && liStatus[tweetId];
+    if (prev?.state === "posted") throw new Error("Already on LinkedIn. Open the dashboard if you want to post it again.");
+    if (prev?.state === "posting" && Date.now() - (prev.at || 0) < 10 * 60e3)
+      throw new Error("The last try was cut off, so it may already be on LinkedIn. Check your LinkedIn first, then post it from the dashboard if it's not there.");
     if (!claim(tweetId)) throw new Error("This post is already being sent to LinkedIn.");
+    await recordPosted(tweetId, { state: "posting", at: Date.now() });
     try {
       const result = await publishToLinkedIn({ text, images, visual, cardData });
       await addHistory({ ok: true, xText, text, url: result.url, imageCount: result.imageCount, visual: result.visual });
@@ -715,6 +732,7 @@ const handlers = {
   },
   async postNow({ tweetId, text, images, visual, cardData }) {
     if (!claim(tweetId)) throw new Error("This post is already being sent to LinkedIn.");
+    await recordPosted(tweetId, { state: "posting", at: Date.now() });
     await withLock(async () => {
       const { queue } = await getStore();
       const q = queue.find(x => x.tweetId === tweetId);
@@ -744,22 +762,28 @@ const handlers = {
   },
   // a post seen on x.com is only auto-posted if X itself confirms it: a real post, by you, with this text.
   // Anything we can't confirm (a script on the page faking one, a protected account, X being slow) waits for your click.
-  async verifyTweet({ id, text }) {
+  async verifyTweet({ id, text, handle }) {
     const s = await getSettings();
-    if (!/^\d{5,25}$/.test(String(id || "")) || !s.myHandle) return { ok: false };
+    const me = String(s.myHandle || handle || "").toLowerCase();
+    if (!/^\d{5,25}$/.test(String(id || "")) || !me) return { ok: false };
+    if (s.myHandle && handle && String(handle).toLowerCase() !== me) return { ok: false }; // signed in as someone else
     const token = ((Number(id) / 1e15) * Math.PI).toString(36).replace(/(0+|\.)/g, "");
-    for (let i = 0; i < 3; i++) {
+    const norm = t => String(t || "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim();
+    // a brand-new post can take a few seconds to show up at X's public endpoint
+    for (let i = 0; i < 6; i++) {
       try {
         const r = await fetch(`https://cdn.syndication.twimg.com/tweet-result?id=${id}&token=${token}&lang=en`, { credentials: "omit", cache: "no-store" });
         if (r.ok) {
           const j = await r.json();
-          const handle = String(j?.user?.screen_name || "").toLowerCase();
-          const norm = t => String(t || "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim().slice(0, 80);
-          if (handle === String(s.myHandle).toLowerCase() && norm(j.text) && norm(j.text) === norm(text)) return { ok: true };
-          return { ok: false };
+          const author = String(j?.user?.screen_name || "").toLowerCase();
+          const full = j?.note_tweet?.note_tweet_results?.result?.text || j?.text;
+          const same = norm(full) === norm(text) || (norm(j?.text).length >= 270 && norm(text).startsWith(norm(j.text).replace(/…$/, "")));
+          if (author !== me || !norm(text) || !same) return { ok: false };
+          const images = (j.mediaDetails || []).filter(m => m.type === "photo" && /^https:\/\/pbs\.twimg\.com\//.test(m.media_url_https || "")).map(m => m.media_url_https);
+          return { ok: true, images };
         }
       } catch {}
-      await new Promise(res => setTimeout(res, 1500));
+      await new Promise(res => setTimeout(res, 2500));
     }
     return { ok: false };
   },
@@ -795,6 +819,11 @@ const handlers = {
       const q = queue.find(x => x.qid === qid);
       if (!q) throw new Error("Queue item not found");
       if (q.status === "posting" && inflight.has(q.tweetId)) throw new Error("It's posting right now. Try again in a moment.");
+      if (patch.at && patch.at < Date.now() + 60_000) {
+        // a time that's already passed (an undo, an old date) goes to the next open slot instead of posting right away
+        const [next] = XLISlots.upcoming(await getSettings(), queue.filter(x => x.qid !== qid), 1);
+        if (next) patch = { ...patch, at: next.at };
+      }
       Object.assign(q, patch);
       if (patch.at) Object.assign(q, { status: "scheduled", error: undefined });
       await chrome.storage.local.set({ queue: queue.sort((a, b) => a.at - b.at) });
@@ -815,6 +844,7 @@ const handlers = {
       const x = queue.find(q => q.qid === a);
       const y = queue.find(q => q.qid === b);
       if (!x || !y) throw new Error("Queue item not found");
+      if (x.status === "posting" || y.status === "posting") throw new Error("One of these is posting right now. Try again in a moment.");
       [x.at, y.at] = [y.at, x.at];
       for (const q of [x, y]) Object.assign(q, { status: "scheduled", error: undefined });
       await chrome.storage.local.set({ queue: queue.sort((m, n) => m.at - n.at) });
@@ -828,6 +858,7 @@ const handlers = {
       const { queue } = await getStore();
       const q = queue.find(x => x.qid === qid);
       if (!q) throw new Error("Queue item not found");
+      if (q.status === "posting") throw new Error("It's posting right now. Try again in a moment.");
       const [next] = XLISlots.upcoming(s, queue.filter(x => x.qid !== qid), 1, Math.max(q.at, Date.now()) + 60000);
       if (!next) throw new Error("No open slot after this one.");
       Object.assign(q, { at: next.at, status: "scheduled", error: undefined });
@@ -964,11 +995,20 @@ const handlers = {
   }
 };
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+// x.com tabs (content scripts) run next to code we don't control, so they only get what they need,
+// and never your LinkedIn secret or Claude key. The dashboard and settings pages get everything.
+const FROM_X = new Set(["getSettings", "prepare", "publish", "skipped", "openOptions", "setHandle", "savePosts", "postBundle", "statusFor", "renderCard", "setProfile", "enqueue", "importFinished", "openDashboard", "verifyTweet"]);
+const stripSecrets = data => (data && data.settings ? { ...data, settings: { ...data.settings, clientSecret: data.settings.clientSecret ? "set" : "", anthropicKey: data.settings.anthropicKey ? "set" : "" } } : data);
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const h = handlers[msg?.type];
   if (!h) return false;
+  const fromTab = !String(sender.url || "").startsWith(chrome.runtime.getURL("")); // anything that isn't our own page
+  if (fromTab && !FROM_X.has(msg.type)) {
+    sendResponse({ ok: false, error: "Not allowed from this page." });
+    return false;
+  }
   h(msg)
-    .then(data => sendResponse({ ok: true, data }))
+    .then(data => sendResponse({ ok: true, data: fromTab ? stripSecrets(data) : data }))
     .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
   return true; // async response
 });

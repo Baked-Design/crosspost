@@ -7,10 +7,24 @@
   if (window.__xliLoaded) return;
   window.__xliLoaded = true;
 
+  let staleShown = false;
+  const staleNotice = () => {
+    if (staleShown) return;
+    staleShown = true;
+    const n = document.createElement("div");
+    n.textContent = "Crosspost was updated. Reload this tab to keep crossposting.";
+    n.style.cssText = "position:fixed;right:20px;bottom:20px;z-index:2147483647;background:#16140f;color:#fbfaf6;padding:12px 16px;border-radius:12px;font:500 13px/1.4 -apple-system,BlinkMacSystemFont,sans-serif;box-shadow:0 12px 32px rgba(0,0,0,.3)";
+    document.documentElement.appendChild(n);
+    setTimeout(() => n.remove(), 12000);
+  };
   const send = msg =>
     new Promise((resolve, reject) => {
+      if (!chrome.runtime?.id) { staleNotice(); return reject(new Error("Extension was updated")); }
       chrome.runtime.sendMessage(msg, res => {
-        if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+        if (chrome.runtime.lastError) {
+          if (/context invalidated|Receiving end/i.test(chrome.runtime.lastError.message || "")) staleNotice();
+          return reject(new Error(chrome.runtime.lastError.message));
+        }
         if (!res) return reject(new Error("No response from extension"));
         res.ok ? resolve(res.data) : reject(new Error(res.error));
       });
@@ -51,6 +65,7 @@
     if (t.parentId && session && session.lastId === t.parentId && Date.now() - session.lastAt < THREAD_WINDOW_MS) {
       session.lastId = t.id;
       session.lastAt = Date.now();
+      session.ids.push(t.id);
       session.parts.push(t.text);
       session.images.push(...t.images.map(bigImg));
       session.hasVideo = session.hasVideo || t.hasVideo;
@@ -77,8 +92,10 @@
       rootId: t.id,
       lastId: t.id,
       lastAt: Date.now(),
+      ids: [t.id],
       parts: [t.text],
       images: settings.includeImages ? t.images.map(bigImg) : [],
+      gen: 0,
       includeImages: settings.includeImages,
       hasVideo: t.hasVideo,
       edited: false,
@@ -101,23 +118,30 @@
       onDone: () => session === s && (session = null)
     });
 
-    let unverified = false;
+    // Scripts on x.com can fake "a post was created" messages, so nothing here is trusted until X confirms it:
+    // the post exists, it's yours, and its text matches. Only a confirmed single post may post on its own
+    // (and only then are its photos, taken from X, and a Claude rewrite used). Threads always wait for a click.
     const prepare = async () => {
+      const gen = ++s.gen;
       ui.update({ xText: s.combined(), images: s.imgs(), hasVideo: s.hasVideo, keepText: s.edited });
       try {
-        const prep = await send({ type: "prepare", text: s.combined() });
-        if (s.edited) prep.linkedinText = null; // don't overwrite your edits
-        if (t.personal) prep.mode = "review"; // never auto-post something that looks personal
-        if (prep.mode !== "review") {
-          // only auto-post what X confirms is really your post; anything else waits for your click
-          const v = await send({ type: "verifyTweet", id: s.rootId, text: s.parts[0] }).catch(() => ({ ok: false }));
-          if (!v.ok) { prep.mode = "review"; unverified = true; }
+        const v = await send({ type: "verifyTweet", id: s.rootId, text: s.parts[0], handle: myHandleFromDom() }).catch(() => ({ ok: false }));
+        if (gen !== s.gen) return; // a newer thread part arrived: that run takes over
+        if (v.ok && s.ids.length === 1) {
+          s.images = s.includeImages ? (v.images || []).map(bigImg) : [];
+          ui.update({ xText: s.combined(), images: s.imgs(), hasVideo: s.hasVideo, keepText: true });
         }
+        const prep = await send({ type: "prepare", text: s.combined(), rewrite: !!v.ok });
+        if (gen !== s.gen) return;
+        if (s.edited) prep.linkedinText = null; // don't overwrite your edits
+        let why = "";
+        if (t.personal) { prep.mode = "review"; why = "This looks personal. Post it to LinkedIn anyway?"; }
+        else if (prep.mode !== "review" && s.ids.length > 1) { prep.mode = "review"; why = "Threads wait for you. Check it, then press Post."; }
+        else if (prep.mode !== "review" && !v.ok) { prep.mode = "review"; why = "Couldn't confirm this post with X, so it waits for you. Press Post to send it."; }
         ui.ready(prep);
-        if (t.personal) ui.warn("This looks personal. Post it to LinkedIn anyway?");
-        else if (unverified) ui.warn("Couldn't confirm this post with X yet, so it waits for you. Press Post to send it.");
+        if (why) ui.warn(why);
       } catch (e) {
-        ui.error(e.message);
+        if (gen === s.gen) ui.error(e.message);
       }
     };
     s.onGrow = () => {
@@ -150,7 +174,7 @@
       const host = document.createElement("div");
       host.id = "xli-toast-host";
       host.style.cssText = "position:fixed;right:20px;bottom:20px;z-index:2147483647;";
-      const root = host.attachShadow({ mode: "open" });
+      const root = host.attachShadow({ mode: "closed" }); // closed: scripts on x.com can't reach in and press Post
       root.innerHTML = `
         <style>
           :host { all: initial; }
@@ -364,15 +388,16 @@
         }
       };
 
-      skipBtn.onclick = () => {
+      skipBtn.onclick = e => {
+        if (!e.isTrusted) return;
         done = true;
         stopCountdown();
         send({ type: "skipped", xText: getXText ? getXText() : xText }).catch(() => {});
         close();
       };
-      postBtn.onclick = doPost;
-      queueBtn.onclick = async () => {
-        if (done) return;
+      postBtn.onclick = e => e.isTrusted && doPost();
+      queueBtn.onclick = async e => {
+        if (!e.isTrusted || done) return;
         stopCountdown();
         const text = ta.value.trim();
         if (!text) return showError("Add some text first.");
@@ -406,6 +431,8 @@
         },
         ready({ linkedinText, rewriteError, mode, countdownSeconds }) {
           if (done) return;
+          if (timer) clearInterval(timer); // never two countdowns at once
+          timer = null;
           status.classList.remove("spin");
           if (linkedinText != null) ta.value = linkedinText;
           ta.disabled = false;

@@ -63,6 +63,7 @@
     btn.addEventListener("click", e => {
       e.preventDefault();
       e.stopPropagation(); // don't open the post
+      if (!e.isTrusted) return; // only a real click from you
       openFor(id, art);
     });
     styleBtn(btn, null);

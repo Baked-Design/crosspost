@@ -175,7 +175,7 @@
 
       const host = document.createElement("div");
       host.style.cssText = "position:fixed;left:50%;top:16px;transform:translateX(-50%);z-index:2147483647;";
-      const root = host.attachShadow({ mode: "open" });
+      const root = host.attachShadow({ mode: "closed" });
       root.innerHTML = `
         <style>
           .pill{display:flex;gap:12px;align-items:center;background:#0a66c2;color:#fff;border-radius:999px;padding:10px 12px 10px 18px;
@@ -189,8 +189,10 @@
       this.ui.btn.onclick = () => (this.running = false);
       this.update();
 
+      // only learn your handle from your own profile (the one X says you're signed in as), never from any link
       const fromUrl = location.pathname.split("/")[1];
-      if (fromUrl && !handle) {
+      const signedIn = ((document.querySelector('a[data-testid="AppTabBar_Profile_Link"]') || {}).getAttribute?.("href") || "").replace(/^\//, "").split(/[/?#]/)[0];
+      if (fromUrl && !handle && signedIn && fromUrl.toLowerCase() === signedIn.toLowerCase()) {
         handle = fromUrl.toLowerCase();
         send({ type: "setHandle", handle });
       }
