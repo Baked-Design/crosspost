@@ -1,0 +1,290 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Crosspost</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="icons/48.png">
+<link rel="stylesheet" href="ui.css">
+<link rel="stylesheet" href="dashboard.css">
+<link rel="stylesheet" href="focus.css">
+</head>
+<body class="focus">
+
+<!-- quiet top line -->
+<header class="top">
+  <button class="wordmark" id="brandBtn" title="Crosspost">Crosspost</button>
+  <div class="statusline" id="statusLine"></div>
+  <div class="top-r">
+    <button class="kbd-btn" id="cmdBtn" title="Search and commands"><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="av sm" id="acctAv" title="Settings"></button>
+  </div>
+</header>
+
+<main class="stage">
+  <!-- REVIEW: one post at a time -->
+  <section class="view" id="view-review">
+    <div class="rv" id="rv">
+      <div class="rv-over">
+        <span class="rv-count" id="rvCount"></span>
+        <span class="rv-meta" id="rvMeta"></span>
+      </div>
+      <article class="rv-card" id="rvCard">
+        <div class="rv-text" id="rvText"></div>
+        <div class="rv-media" id="rvMedia"></div>
+      </article>
+      <div class="rv-actions">
+        <div class="rv-secondary">
+          <button class="act" id="rvSkip">Skip<kbd>S</kbd></button>
+          <button class="act" id="rvEdit">Edit<kbd>E</kbd></button>
+          <button class="act" id="rvPersonal" title="Not for LinkedIn. Won't be suggested again.">Personal<kbd>P</kbd></button>
+        </div>
+        <button class="act primary" id="rvQueue"><span id="rvQueueLbl">Queue</span><kbd>Q</kbd></button>
+      </div>
+      <p class="rv-hint" id="rvHint"></p>
+    </div>
+
+    <div class="calm" id="rvEmpty" hidden>
+      <h2 id="rvEmptyTitle">Bring in your X posts</h2>
+      <p id="rvEmptyText">Crosspost reads your profile once and saves your posts here. Then you review them one at a time.</p>
+      <div class="row center">
+        <button class="btn primary" id="importX"><i data-i="download"></i>Import from X</button>
+        <button class="btn ghost" id="importArchiveBtn">Import archive</button>
+      </div>
+      <input type="file" id="archiveFile" accept=".js,.json" hidden>
+    </div>
+  </section>
+
+  <!-- QUEUE -->
+  <section class="view narrow" id="view-queue" hidden>
+    <div class="vh">
+      <h1>Queue</h1>
+      <div class="pop-wrap">
+        <button class="btn sm ghost" id="schedBtn"><i data-i="sliders"></i>Schedule</button>
+        <div class="pop sched-pop" id="schedPanel" hidden>
+          <div class="panel-h"><b id="runTitle">12-week run</b><button class="btn sm" id="runBtn">Start</button></div>
+          <div class="stats">
+            <div><b id="rWeek">0/3</b><span>this week</span></div>
+            <div><b id="rStreak">0</b><span>streak</span></div>
+            <div><b id="rUntil">–</b><span>covered to</span></div>
+          </div>
+          <div class="weeks" id="rWeeks"></div>
+          <p class="nudge" id="rNudge"></p>
+          <div class="pop-sep"></div>
+          <label class="lbl">Days</label>
+          <div class="days" id="slotDays"></div>
+          <div class="two-col">
+            <div><label class="lbl" for="slotTimes">Times</label><input class="input" id="slotTimes" placeholder="09:00, 17:30"></div>
+            <div><label class="lbl" for="ppw">Per week</label><select class="input" id="ppw"><option>2</option><option>3</option><option>4</option><option>5</option><option>7</option></select></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="queueList"></div>
+  </section>
+
+  <!-- CALENDAR -->
+  <section class="view" id="view-calendar" hidden>
+    <div class="vh">
+      <div>
+        <h1 id="calTitle">Calendar</h1>
+        <p class="vh-sub" id="calSummary"></p>
+      </div>
+      <div class="row cal-nav">
+        <button class="icon-btn" id="calPrev" title="Previous month"><i data-i="chevl"></i></button>
+        <button class="btn sm ghost" id="calToday">Today</button>
+        <button class="icon-btn" id="calNext" title="Next month"><i data-i="chevr"></i></button>
+      </div>
+    </div>
+    <div class="cal-legend">
+      <span><i class="lg posted"></i>Posted</span>
+      <span><i class="lg sched"></i>Scheduled</span>
+      <span><i class="lg sugg"></i>Suggested</span>
+    </div>
+    <div class="cal" id="cal"></div>
+  </section>
+
+  <!-- PUBLISHED -->
+  <section class="view narrow" id="view-published" hidden>
+    <div class="vh"><h1>Posted</h1></div>
+    <div id="pubRows"></div>
+    <div class="calm" id="emptyPublished" hidden>
+      <h2>Nothing posted yet</h2>
+      <p>Posts you send to LinkedIn show up here.</p>
+    </div>
+  </section>
+
+  <!-- ALL POSTS (secondary, from search) -->
+  <section class="view" id="view-library" hidden>
+    <div class="vh">
+      <h1>All posts</h1>
+      <div class="row">
+        <label class="search"><i data-i="search"></i><input id="q" placeholder="Search" autocomplete="off"></label>
+        <div class="pop-wrap">
+          <button class="btn sm ghost" id="filterBtn"><i data-i="filter"></i><em class="fcount" id="fCount" hidden></em></button>
+          <div class="pop" id="filterPop" hidden>
+            <label class="opt"><input type="checkbox" id="fImages"><span>Has images</span></label>
+            <label class="opt"><input type="checkbox" id="fThreads"><span>Threads only</span></label>
+            <div class="pop-sep"></div>
+            <label class="opt"><input type="checkbox" id="fReplies"><span>Include replies</span></label>
+            <label class="opt"><input type="checkbox" id="fQuotes"><span>Include quote posts</span></label>
+            <div class="pop-sep"></div>
+            <label class="opt"><input type="checkbox" id="fHidePersonal" checked><span>Hide personal posts</span></label>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="fillbar" id="fillBar" hidden>
+      <i data-i="clock"></i><span id="fillText">Pick a post for this slot</span>
+      <button class="btn sm ghost" id="fillCancel">Cancel</button>
+    </div>
+    <div class="seg quiet" id="statusSeg">
+      <button data-s="open" class="on">To post <em id="cOpen"></em></button>
+      <button data-s="queued">Queued <em id="cQueued"></em></button>
+      <button data-s="posted">Posted <em id="cPosted"></em></button>
+      <button data-s="all">All <em id="cAll"></em></button>
+    </div>
+    <div class="table" id="table">
+      <div class="tr th">
+        <div class="c-sel"><input type="checkbox" id="selAll" title="Select all on screen"></div>
+        <div class="c-post">Post</div>
+        <div class="c-num sortable" data-sort="createdAt">Date</div>
+        <div class="c-num sortable" data-sort="likes">Likes</div>
+        <div class="c-num sortable" data-sort="views">Views</div>
+        <div class="c-st"></div>
+        <div class="c-act"></div>
+      </div>
+      <div id="rows"></div>
+      <div class="more"><button class="btn" id="moreBtn" hidden>Show more</button></div>
+    </div>
+  </section>
+</main>
+
+<!-- floating dock -->
+<nav class="dock" id="dock">
+  <a data-view="review" title="Review (1)"><i data-i="card"></i></a>
+  <a data-view="queue" title="Queue (2)"><i data-i="list"></i><em id="nQueue"></em></a>
+  <a data-view="calendar" title="Calendar (3)"><i data-i="calendar"></i></a>
+  <a data-view="published" title="Posted (4)"><i data-i="check"></i></a>
+  <span class="dock-sep"></span>
+  <button id="dockSearch" title="Search (⌘K)"><i data-i="search"></i></button>
+  <button id="dockSettings" title="Settings"><i data-i="sliders"></i></button>
+</nav>
+
+<!-- command palette -->
+<div class="cmd-scrim" id="cmdScrim" hidden></div>
+<div class="cmd" id="cmd" hidden>
+  <div class="cmd-in"><i data-i="search"></i><input id="cmdInput" placeholder="Search posts or type a command" autocomplete="off"><kbd>esc</kbd></div>
+  <div class="cmd-list" id="cmdList"></div>
+</div>
+
+<!-- settings sheet -->
+<div class="sheet-scrim" id="sheetScrim" hidden></div>
+<aside class="sheet" id="sheet" hidden>
+  <button class="icon-btn sheet-x" id="sheetClose" title="Close"><i data-i="x"></i></button>
+  <iframe id="settingsFrame" title="Settings"></iframe>
+</aside>
+
+<!-- bulk bar -->
+<div class="bulk" id="bulk" hidden>
+  <span id="bulkN">0 selected</span>
+  <button class="btn sm ghost-inv" id="bulkClear">Clear</button>
+  <button class="btn sm inv" id="bulkQueue"><i data-i="queue"></i>Add to queue</button>
+</div>
+
+<!-- ============ COMPOSER ============ -->
+<div class="modal-scrim" id="scrim" hidden></div>
+<div class="modal" id="composer" role="dialog" aria-modal="true" hidden>
+  <div class="m-head">
+    <div class="m-title">
+      <h2 class="display">Edit for LinkedIn</h2>
+      <span id="cBadge"></span>
+    </div>
+    <div class="m-head-r">
+      <a class="btn sm ghost" id="cXLink" target="_blank"><i data-i="external"></i>View on X</a>
+      <button class="icon-btn" id="cClose" title="Close (Esc)"><i data-i="x"></i></button>
+    </div>
+  </div>
+
+  <div class="m-body">
+    <!-- editor -->
+    <div class="m-edit">
+      <details class="orig" id="cOrigWrap">
+        <summary><span>Original on X</span><span class="orig-meta" id="cOrigMeta"></span></summary>
+        <div class="orig-txt" id="cOrig"></div>
+      </details>
+
+      <label class="opt inline" id="cThreadWrap" hidden><input type="checkbox" id="cThread" checked><span id="cThreadLbl">Include full thread</span></label>
+
+      <div class="editor">
+        <textarea id="cText" spellcheck="true" placeholder="Write your LinkedIn post"></textarea>
+        <div class="ed-bar">
+          <button class="btn sm ghost" id="cRewrite"><i data-i="sparkles"></i>Rewrite</button>
+          <button class="btn sm ghost" id="cReset"><i data-i="undo"></i>Reset</button>
+          <span class="grow"></span>
+          <span class="count" id="cCount">0 / 3,000</span>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-h"><span>Visual</span><small id="cVisHint"></small></div>
+        <div class="seg full" id="cVis">
+          <button data-v="images"><i data-i="image"></i>Post images</button>
+          <button data-v="none"><i data-i="text"></i>Text only</button>
+          <button data-v="card"><i data-i="card"></i>Tweet card</button>
+        </div>
+        <div class="imgpick" id="cImgs" hidden></div>
+        <p class="fine" id="cVideo" hidden>This post has a video or GIF. Only text and images carry over.</p>
+      </div>
+
+      <details class="field hook" id="cHookWrap">
+        <summary><span>Hook check</span><span class="score" id="cHookScore"></span><span class="grow"></span><button class="btn sm ghost" id="cHookAI"><i data-i="sparkles"></i>Check with Claude</button></summary>
+        <ul class="checks" id="cChecks"></ul>
+        <div id="cOpeners"></div>
+      </details>
+
+      <div id="cMsg"></div>
+    </div>
+
+    <!-- preview -->
+    <div class="m-prev">
+      <div class="prev-h"><span>LinkedIn preview</span><small>Feed, desktop</small></div>
+      <div class="li-post" id="liPost">
+        <div class="li-top">
+          <span class="li-av" id="liAv"></span>
+          <div class="li-who"><b id="liName">You</b><small id="liSub">Now · <i data-i="globe"></i></small></div>
+        </div>
+        <div class="li-text" id="liText"></div>
+        <div class="li-media" id="liMedia"></div>
+        <div class="li-actions">
+          <span><i data-i="like"></i>Like</span><span><i data-i="comment"></i>Comment</span><span><i data-i="repeat"></i>Repost</span><span><i data-i="send"></i>Send</span>
+        </div>
+      </div>
+      <p class="fine center" id="foldNote">Everything above “…more” is what people see before they click.</p>
+    </div>
+  </div>
+
+  <div class="m-foot">
+    <button class="btn ghost" id="cMark">Mark as posted</button>
+    <span class="grow"></span>
+    <span class="slot-hint" id="cSlotHint"></span>
+    <button class="btn" id="cQueue"><i data-i="queue"></i>Add to queue</button>
+    <div class="pop-wrap">
+      <button class="btn" id="cSchedBtn"><i data-i="clock"></i>Schedule</button>
+      <div class="pop up" id="schedPop" hidden>
+        <label class="lbl" for="cAt">Post at</label>
+        <input class="input" type="datetime-local" id="cAt">
+        <button class="btn primary block" id="cSchedule">Schedule</button>
+      </div>
+    </div>
+    <button class="btn primary" id="cPost"><i data-i="send"></i>Post now</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="icons.js"></script>
+<script src="parse.js"></script>
+<script src="dashboard.js"></script>
+</body>
+</html>

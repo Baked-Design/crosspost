@@ -1,0 +1,70 @@
+{
+  "manifest_version": 3,
+  "name": "Crosspost: X to LinkedIn",
+  "version": "1.8.1",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwmKTZwY8n8zYtMAVk7kZgRAhVCRMufJXIaPxWyBCnFCCa4DzYxJrhdpqxe5ISETOQ2wygEF8YXyZK/c25S0J4W+UPY9i4t4Dth8B2bsrUzKn9nWvptGRuP/ySsRznEaqJ9zShURgiFN7EDBA2ixMR53bcYtT6zU9z4aaAivIwuiGlY3IAjFEfz+IcgFSt7xwZZoYStI2u9WHUQHIrYP6IzS9ggynUUdRIWJGwHvecdtjdvKZc8JMOXuwoHIz5d9nGiNZXzCA8iXQMNMM1xEs11VOHeMlSkAEW4l03+igEE/PW/98XZ1ZGUbkAI3t0lE3gIMYx8SaAr0H01DLkp6BDQIDAQAB",
+  "description": "Crosspost to LinkedIn when you post on X. Dashboard to repost old X posts, with a scheduler.",
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "identity",
+    "alarms",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://x.com/*",
+    "https://twitter.com/*",
+    "https://pbs.twimg.com/*",
+    "https://*.linkedin.com/*",
+    "https://api.anthropic.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*"
+      ],
+      "js": [
+        "inject.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*"
+      ],
+      "js": [
+        "parse.js",
+        "content.js",
+        "harvest.js",
+        "buttons.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "options_page": "options.html",
+  "action": {
+    "default_title": "Open Crosspost"
+  },
+  "icons": {
+    "16": "icons/16.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "fonts/*"
+      ],
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,192 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Crosspost Settings</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="icons/48.png">
+<link rel="stylesheet" href="ui.css">
+<style>
+  main { max-width: 760px; margin: 0 auto; padding: 40px 40px 80px; }
+  .sec .panel { border-color: var(--line-2); box-shadow: none; border-radius: 14px; }
+  .btn { border-radius: 999px; }
+  .ph { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 22px; }
+  .ph h1 { margin: 0; font-family: var(--display); font-weight: 400; font-size: 38px; line-height: 1.05; letter-spacing: -0.025em; }
+  .ph p { margin: 4px 0 0; color: var(--muted); }
+  body.embed .standalone { display: none; }
+  body.embed main { padding-top: 48px; }
+  .sec { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 28px; padding: 24px 0; border-top: 1px solid var(--line); }
+  .sec:first-of-type { border-top: 0; padding-top: 4px; }
+  .sec-h h2 { margin: 0; font-family: var(--display); font-weight: 400; font-size: 18px; letter-spacing: -0.015em; }
+  .sec-h p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+  .sec .panel { padding: 16px 18px; }
+  .sec .panel > .lbl:first-child { margin-top: 0; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .two .lbl { margin-top: 14px; }
+  .copy { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 6px 0 11px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-2); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .copy span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+  .conn { display: flex; align-items: center; gap: 12px; }
+  .conn .grow { min-width: 0; }
+  .conn b { display: block; font-size: 13px; }
+  .conn small { color: var(--muted); font-size: 12px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); flex: none; }
+  .dot.on { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+  .toggle { display: flex; align-items: flex-start; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line-2); cursor: pointer; }
+  .toggle:first-child { border-top: 0; padding-top: 2px; }
+  .toggle > span { flex: 1; }
+  .toggle b { display: block; font-weight: 500; font-size: 13px; }
+  .toggle small { color: var(--muted); font-size: 12px; }
+  .switch { appearance: none; -webkit-appearance: none; width: 32px !important; height: 19px !important; border-radius: 99px; background: var(--line); position: relative; cursor: pointer; transition: background .15s; flex: none; margin-top: 1px !important; }
+  .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: transform .15s; }
+  .switch:checked { background: var(--primary); }
+  .switch:checked::after { transform: translateX(13px); background: var(--primary-fg); }
+  .steps { margin: 0 0 4px; padding-left: 18px; color: var(--muted); font-size: 12.5px; }
+  .steps li { margin: 3px 0; }
+  .hist { list-style: none; margin: 0; padding: 0; }
+  .hist li { display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line-2); font-size: 12.5px; align-items: start; }
+  .hist li:first-child { border-top: 0; padding-top: 0; }
+  .hist .x { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .hist .t { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+  .hist .s { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 800; }
+  .hist .s.ok { background: var(--ok-soft); color: var(--ok); }
+  .hist .s.skip { background: var(--hover); color: var(--muted); }
+  .hist .s.bad { background: var(--bad-soft); color: var(--bad); }
+  .dim { opacity: .5; pointer-events: none; }
+  details.setup { margin-top: 12px; }
+  details.setup summary { display: flex; align-items: baseline; gap: 10px; cursor: pointer; list-style: none; }
+  details.setup summary::-webkit-details-marker { display: none; }
+  details.setup summary::before { content: "›"; color: var(--muted); transition: transform .15s; display: inline-block; }
+  details.setup[open] summary::before { transform: rotate(90deg); }
+  details.setup summary b { font-size: 13px; font-weight: 600; }
+  details.setup summary span { color: var(--muted); font-size: 12px; }
+  details.setup[open] summary { margin-bottom: 12px; }
+  @media (max-width: 760px) { .sec { grid-template-columns: 1fr; gap: 12px; } main { padding: 20px 16px 60px; } .two { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <header class="ph">
+    <div>
+      <h1>Settings</h1>
+      <p>Everything is stored only in this browser.</p>
+    </div>
+    <a class="btn standalone" href="dashboard.html">Open dashboard</a>
+  </header>
+
+  <section class="sec">
+    <div class="sec-h"><h2>LinkedIn connection</h2><p>Uses your own LinkedIn app, so nothing goes through anyone else's servers.</p></div>
+    <div>
+      <div class="panel">
+        <div class="conn">
+          <span class="dot" id="statusDot"></span>
+          <div class="grow"><b id="status">Not connected</b><small id="statusSub">Add your app details below, then connect</small></div>
+          <button class="btn ghost" id="disconnect" hidden>Disconnect</button>
+          <button class="btn primary" id="connect">Connect LinkedIn</button>
+        </div>
+        <div id="connectMsg"></div>
+      </div>
+      <details class="panel setup" id="setup">
+        <summary><b>LinkedIn app details</b><span id="setupHint">Client ID, secret, redirect URL</span></summary>
+        <ol class="steps">
+          <li>Create an app at <a href="https://www.linkedin.com/developers/apps" target="_blank">linkedin.com/developers</a></li>
+          <li>Add the <b>Share on LinkedIn</b> and <b>Sign In with LinkedIn (OpenID Connect)</b> products</li>
+          <li>Under Auth, add this redirect URL, click Update, then copy your keys here</li>
+        </ol>
+        <label class="lbl">Redirect URL <span>click to copy</span></label>
+        <div class="copy" id="redirectBox"><span id="redirect"></span><button class="btn sm ghost" type="button">Copy</button></div>
+        <div class="two">
+          <div><label class="lbl" for="clientId">Client ID</label><input class="input" id="clientId" autocomplete="off"></div>
+          <div><label class="lbl" for="clientSecret">Client secret</label><input class="input" type="password" id="clientSecret" autocomplete="off"></div>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-h"><h2>Live crossposting</h2><p>What happens right after you post on X.</p></div>
+    <div class="panel">
+      <label class="lbl" for="mode">After you post on X</label>
+      <select class="input" id="mode">
+        <option value="countdown">Show a preview, post after a countdown</option>
+        <option value="review">Show a preview, wait for me</option>
+        <option value="instant">Post to LinkedIn right away</option>
+      </select>
+      <div id="countdownWrap">
+        <label class="lbl" for="countdownSeconds">Countdown <span>seconds</span></label>
+        <input class="input" type="number" id="countdownSeconds" min="3" max="120">
+      </div>
+      <label class="lbl" for="skipMarker">X-only marker <span>optional</span></label>
+      <input class="input" id="skipMarker" placeholder="e.g. #xonly">
+      <p class="fine">Posts containing this stay on X only.</p>
+      <div style="margin-top:14px">
+        <label class="toggle"><span><b>Skip replies</b><small>Replies to other people never crosspost</small></span><input type="checkbox" class="switch" id="skipReplies"></label>
+        <label class="toggle"><span><b>Skip quote posts</b><small>Quotes rarely make sense without the original</small></span><input type="checkbox" class="switch" id="skipQuotes"></label>
+        <label class="toggle"><span><b>Carry images over</b><small>Attach your X post's photos when there are any</small></span><input type="checkbox" class="switch" id="includeImages"></label>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-h"><h2>Suggestions</h2><p>Keep personal posts (weather, family, cars, jokes) out of your LinkedIn.</p></div>
+    <div class="panel">
+      <label class="lbl" for="topics">What you post about on LinkedIn <span>comma separated</span></label>
+      <input class="input" id="topics" placeholder="e.g. design, running an agency, AI tools, Framer, pricing">
+      <p class="fine">Posts about these count as work. Everything else gets a closer look.</p>
+      <div style="margin-top:12px">
+        <label class="toggle"><span><b>Only suggest work posts</b><small>Posts that look personal never show up in Review, Queue or Calendar</small></span><input type="checkbox" class="switch" id="hidePersonal"></label>
+        <label class="toggle"><span><b>Let Claude screen unclear posts</b><small>Uses your Anthropic key. Runs quietly on posts the quick check isn't sure about.</small></span><input type="checkbox" class="switch" id="screenWithClaude"></label>
+      </div>
+      <label class="lbl" for="personalLive">When a new X post looks personal</label>
+      <select class="input" id="personalLive">
+        <option value="ask">Ask me before posting to LinkedIn</option>
+        <option value="skip">Keep it on X only</option>
+        <option value="post">Treat it like any other post</option>
+      </select>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-h"><h2>Visuals</h2><p>A text-only post gets 2 lines in the LinkedIn feed. A visual fills the screen.</p></div>
+    <div class="panel">
+      <label class="lbl" for="visualMode">Default visual</label>
+      <select class="input" id="visualMode">
+        <option value="auto">The post as it is: its photos, or text only</option>
+        <option value="images">Only the post's photos</option>
+        <option value="none">Always text only</option>
+        <option value="card">Always a tweet card</option>
+      </select>
+      <label class="lbl" for="cardTheme">Tweet card style</label>
+      <select class="input" id="cardTheme">
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+      </select>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-h"><h2>Claude</h2><p>Optional. Rewrites for LinkedIn and runs the hook check. Uses your own API key.</p></div>
+    <div class="panel">
+      <label class="toggle" style="padding-top:0"><span><b>Rewrite live crossposts</b><small>Rewrite each X post before the preview shows</small></span><input type="checkbox" class="switch" id="rewriteEnabled"></label>
+      <div id="rewriteWrap">
+        <label class="lbl" for="anthropicKey">Anthropic API key</label>
+        <input class="input" type="password" id="anthropicKey" placeholder="sk-ant-…" autocomplete="off">
+        <label class="lbl" for="anthropicModel">Model</label>
+        <div class="row" style="flex-wrap:nowrap">
+          <select class="input" id="anthropicModel"><option value="">Auto (latest Sonnet)</option></select>
+          <button class="btn" id="loadModels" type="button">Load models</button>
+        </div>
+        <label class="lbl" for="rewriteInstructions">Rewrite instructions <button class="btn sm ghost" id="playbook" type="button" style="height:22px">Reset to playbook</button></label>
+        <textarea class="input" id="rewriteInstructions" rows="8"></textarea>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-h"><h2>Recent activity</h2><p>The last crossposts from X.</p></div>
+    <div class="panel"><ul class="hist" id="history"><li class="t">Nothing yet.</li></ul></div>
+  </section>
+</main>
+<div class="toast" id="saved">Saved</div>
+<script src="options.js"></script>
+</body>
+</html>
