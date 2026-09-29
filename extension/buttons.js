@@ -72,8 +72,9 @@
 
   async function openFor(id, art) {
     if (!window.XLIToast) return;
-    // make sure there's only one preview open
-    document.querySelectorAll("#xli-toast-host").forEach(n => n.remove());
+    // make sure there's only one preview open (and stop any countdown that was running in it)
+    if (XLIToast.closeActive) XLIToast.closeActive();
+    else document.querySelectorAll("#xli-toast-host").forEach(n => n.remove());
 
     const dom = window.XLIHarvest ? XLIHarvest.scrapeArticle(art) : null;
     let bundle = { post: null, parts: [], status: null, queued: null };

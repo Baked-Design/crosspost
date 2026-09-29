@@ -101,14 +101,21 @@
       onDone: () => session === s && (session = null)
     });
 
+    let unverified = false;
     const prepare = async () => {
       ui.update({ xText: s.combined(), images: s.imgs(), hasVideo: s.hasVideo, keepText: s.edited });
       try {
         const prep = await send({ type: "prepare", text: s.combined() });
         if (s.edited) prep.linkedinText = null; // don't overwrite your edits
         if (t.personal) prep.mode = "review"; // never auto-post something that looks personal
+        if (prep.mode !== "review") {
+          // only auto-post what X confirms is really your post; anything else waits for your click
+          const v = await send({ type: "verifyTweet", id: s.rootId, text: s.parts[0] }).catch(() => ({ ok: false }));
+          if (!v.ok) { prep.mode = "review"; unverified = true; }
+        }
         ui.ready(prep);
         if (t.personal) ui.warn("This looks personal. Post it to LinkedIn anyway?");
+        else if (unverified) ui.warn("Couldn't confirm this post with X yet, so it waits for you. Press Post to send it.");
       } catch (e) {
         ui.error(e.message);
       }
@@ -131,7 +138,15 @@
 
   // ---------- toast UI (shadow DOM so X's CSS can't touch it) ----------
   const Toast = {
+    active: null,
+    // closing a pop-up always stops its countdown: nothing is ever posted from a pop-up you can't see
+    closeActive() {
+      if (Toast.active) Toast.active.kill();
+      Toast.active = null;
+      document.querySelectorAll("#xli-toast-host").forEach(n => n.remove());
+    },
     open({ xText, images, hasVideo, tweetId, getImages, getXText, onEdit, onDone, allowQueue, title, visual, visualMode, getCardData }) {
+      Toast.closeActive();
       const host = document.createElement("div");
       host.id = "xli-toast-host";
       host.style.cssText = "position:fixed;right:20px;bottom:20px;z-index:2147483647;";
@@ -309,7 +324,7 @@
       };
 
       const doPost = async () => {
-        if (done) return;
+        if (done || !host.isConnected) return;
         done = true;
         stopCountdown();
         postBtn.disabled = true;
@@ -380,7 +395,15 @@
       ["focus", "input", "mousedown"].forEach(ev => ta.addEventListener(ev, () => timer && stopCountdown()));
       ta.addEventListener("input", () => onEdit && onEdit());
 
-      return {
+      const api = {
+        kill() {
+          done = true;
+          if (timer) clearInterval(timer);
+          timer = null;
+          onDone && onDone();
+          host.remove();
+          if (Toast.active === api) Toast.active = null;
+        },
         ready({ linkedinText, rewriteError, mode, countdownSeconds }) {
           if (done) return;
           status.classList.remove("spin");
@@ -401,6 +424,13 @@
               });
             });
             timer = setInterval(() => {
+              if (!host.isConnected) {
+                // the pop-up was removed (another preview opened, X redrew the page): stop, don't post
+                stopCountdown();
+                done = true;
+                onDone && onDone();
+                return;
+              }
               left -= 1;
               if (left <= 0) {
                 clearInterval(timer);
@@ -439,6 +469,8 @@
           showError(msg);
         }
       };
+      Toast.active = api;
+      return api;
     }
   };
   globalThis.XLIToast = Toast;

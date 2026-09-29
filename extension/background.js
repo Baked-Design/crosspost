@@ -52,10 +52,20 @@ async function getAuth() {
   const { auth } = await chrome.storage.local.get("auth");
   return auth || null;
 }
-async function addHistory(entry) {
-  const { history = [] } = await chrome.storage.local.get("history");
-  history.unshift({ at: Date.now(), ...entry });
-  await chrome.storage.local.set({ history: history.slice(0, HISTORY_MAX) });
+// history and posted records are read, changed and written back: one at a time, so two posts
+// finishing together can't overwrite each other
+let recChain = Promise.resolve();
+function recLock(fn) {
+  const run = recChain.then(fn, fn);
+  recChain = run.catch(() => {});
+  return run;
+}
+function addHistory(entry) {
+  return recLock(async () => {
+    const { history = [] } = await chrome.storage.local.get("history");
+    history.unshift({ at: Date.now(), ...entry });
+    await chrome.storage.local.set({ history: history.slice(0, HISTORY_MAX) });
+  });
 }
 
 // ---------- LinkedIn OAuth ----------
@@ -277,6 +287,7 @@ async function renderCard(cardData) {
 }
 
 async function publishToLinkedIn({ text, images = [], visual, cardData }) {
+  if (String(text || "").length > 3000) throw new Error(`This post is ${String(text).length.toLocaleString()} characters. LinkedIn allows 3,000: open it in the dashboard and trim it.`);
   images = await resolveVisual({ images, visual, cardData });
   const auth = await requireAuth();
   const imageUrns = [];
@@ -371,11 +382,41 @@ function notify(title, message) {
   } catch {}
 }
 
-async function recordPosted(tweetId, info) {
-  if (!tweetId) return;
-  const { liStatus = {} } = await chrome.storage.local.get("liStatus");
-  liStatus[tweetId] = { ...liStatus[tweetId], ...info };
-  await chrome.storage.local.set({ liStatus });
+function recordPosted(tweetId, info) {
+  if (!tweetId) return Promise.resolve();
+  return recLock(async () => {
+    const { liStatus = {} } = await chrome.storage.local.get("liStatus");
+    liStatus[tweetId] = { ...liStatus[tweetId], ...info };
+    await chrome.storage.local.set({ liStatus });
+  });
+}
+
+// one post, one publish: whoever claims a post first (Post now, the scheduler, the live pop-up)
+// publishes it; anyone else gets a clear message instead of a duplicate on LinkedIn
+const inflight = new Set();
+function claim(tweetId) {
+  if (!tweetId) return true;
+  if (inflight.has(tweetId)) return false;
+  inflight.add(tweetId);
+  return true;
+}
+const release = tweetId => tweetId && inflight.delete(tweetId);
+
+// a post that was mid-publish when Chrome closed or the extension restarted can't stay
+// "Posting…" forever. We can't know if LinkedIn got it, so it's marked for you to check, never re-sent.
+const STUCK_MS = 5 * 60 * 1000;
+async function recoverStuck() {
+  await withLock(async () => {
+    const { queue } = await getStore();
+    let changed = false;
+    for (const q of queue) {
+      if (q.status === "posting" && !inflight.has(q.tweetId) && Date.now() - (q.postingAt || 0) > STUCK_MS) {
+        Object.assign(q, { status: "failed", error: "Interrupted while posting. Check LinkedIn first: if it's not there, press Post now." });
+        changed = true;
+      }
+    }
+    if (changed) await chrome.storage.local.set({ queue });
+  });
 }
 
 let ticking = false;
@@ -386,11 +427,18 @@ async function processQueue() {
     // Pick one due item per tick so a backlog (e.g. Chrome was closed) trickles out.
     const item = await withLock(async () => {
       const { queue } = await getStore();
+      const { liStatus } = await getStore();
       const due = queue
-        .filter(q => q.status === "scheduled" && q.at <= Date.now())
+        .filter(q => q.status === "scheduled" && q.at <= Date.now() && !inflight.has(q.tweetId))
         .sort((a, b) => a.at - b.at)[0];
       if (!due) return null;
-      due.status = "posting";
+      if (liStatus[due.tweetId]?.state === "posted" && liStatus[due.tweetId].at > (due.queuedAt || 0)) {
+        // already went out another way (Post now, the live pop-up) after it was queued: drop it, don't post twice
+        await chrome.storage.local.set({ queue: queue.filter(q => q.qid !== due.qid) });
+        return null;
+      }
+      if (!claim(due.tweetId)) return null;
+      Object.assign(due, { status: "posting", postingAt: Date.now() });
       await chrome.storage.local.set({ queue });
       return { ...due };
     });
@@ -414,6 +462,8 @@ async function processQueue() {
       });
       await recordPosted(item.tweetId, { state: "failed", error: e.message, at: Date.now() });
       notify("LinkedIn post failed", e.message);
+    } finally {
+      release(item.tweetId);
     }
   } finally {
     ticking = false;
@@ -425,10 +475,10 @@ function ensureAlarm() {
     if (!a) chrome.alarms.create("xli-tick", { periodInMinutes: 1 });
   });
 }
-chrome.alarms.onAlarm.addListener(a => a.name === "xli-tick" && processQueue());
+chrome.alarms.onAlarm.addListener(a => a.name === "xli-tick" && recoverStuck().then(processQueue, processQueue));
 chrome.runtime.onStartup.addListener(() => {
   ensureAlarm();
-  processQueue();
+  recoverStuck().then(processQueue, processQueue);
 });
 ensureAlarm();
 
@@ -576,6 +626,9 @@ const handlers = {
     return { linkedinText, rewriteError, mode: s.mode, countdownSeconds: s.countdownSeconds };
   },
   async publish({ text, images, xText, tweetId, visual, cardData }) {
+    const { liStatus } = await getStore();
+    if (tweetId && liStatus[tweetId]?.state === "posted") throw new Error("Already on LinkedIn. Open the dashboard if you want to post it again.");
+    if (!claim(tweetId)) throw new Error("This post is already being sent to LinkedIn.");
     try {
       const result = await publishToLinkedIn({ text, images, visual, cardData });
       await addHistory({ ok: true, xText, text, url: result.url, imageCount: result.imageCount, visual: result.visual });
@@ -589,6 +642,8 @@ const handlers = {
     } catch (e) {
       await addHistory({ ok: false, xText, text, error: e.message });
       throw e;
+    } finally {
+      release(tweetId);
     }
   },
   async skipped({ xText }) {
@@ -659,6 +714,12 @@ const handlers = {
     return { text: await rewriteWithClaude(text, { ...s, anthropicKey: s.anthropicKey }) };
   },
   async postNow({ tweetId, text, images, visual, cardData }) {
+    if (!claim(tweetId)) throw new Error("This post is already being sent to LinkedIn.");
+    await withLock(async () => {
+      const { queue } = await getStore();
+      const q = queue.find(x => x.tweetId === tweetId);
+      if (q) { Object.assign(q, { status: "posting", postingAt: Date.now(), error: undefined }); await chrome.storage.local.set({ queue }); }
+    });
     try {
       const r = await publishToLinkedIn({ text, images, visual, cardData });
       await recordPosted(tweetId, { state: "posted", url: r.url, at: Date.now(), text, images: (images || []).filter(x => typeof x === "string").slice(0, 4), visual: r.visual });
@@ -671,11 +732,41 @@ const handlers = {
       return r;
     } catch (e) {
       await recordPosted(tweetId, { state: "failed", error: e.message, at: Date.now() });
+      await withLock(async () => {
+        const { queue } = await getStore();
+        const q = queue.find(x => x.tweetId === tweetId && x.status === "posting");
+        if (q) { Object.assign(q, { status: "failed", error: e.message }); await chrome.storage.local.set({ queue }); }
+      });
       throw e;
+    } finally {
+      release(tweetId);
     }
+  },
+  // a post seen on x.com is only auto-posted if X itself confirms it: a real post, by you, with this text.
+  // Anything we can't confirm (a script on the page faking one, a protected account, X being slow) waits for your click.
+  async verifyTweet({ id, text }) {
+    const s = await getSettings();
+    if (!/^\d{5,25}$/.test(String(id || "")) || !s.myHandle) return { ok: false };
+    const token = ((Number(id) / 1e15) * Math.PI).toString(36).replace(/(0+|\.)/g, "");
+    for (let i = 0; i < 3; i++) {
+      try {
+        const r = await fetch(`https://cdn.syndication.twimg.com/tweet-result?id=${id}&token=${token}&lang=en`, { credentials: "omit", cache: "no-store" });
+        if (r.ok) {
+          const j = await r.json();
+          const handle = String(j?.user?.screen_name || "").toLowerCase();
+          const norm = t => String(t || "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim().slice(0, 80);
+          if (handle === String(s.myHandle).toLowerCase() && norm(j.text) && norm(j.text) === norm(text)) return { ok: true };
+          return { ok: false };
+        }
+      } catch {}
+      await new Promise(res => setTimeout(res, 1500));
+    }
+    return { ok: false };
   },
   // items: [{tweetId, text, images, at?}] ; items without `at` get the next free slots
   async enqueue({ items }) {
+    const long = (items || []).find(i => String(i.text || "").length > 3000);
+    if (long) throw new Error(`That post is ${String(long.text).length.toLocaleString()} characters. LinkedIn allows 3,000: trim it in the editor first.`);
     return withLock(async () => {
       const s = await getSettings();
       const { queue } = await getStore();
@@ -691,6 +782,7 @@ const handlers = {
         visual: i.visual || "images",
         cardData: i.cardData || null,
         at: i.at || slots.shift(),
+        queuedAt: Date.now(),
         status: "scheduled"
       }));
       await chrome.storage.local.set({ queue: [...rest, ...added].sort((a, b) => a.at - b.at) });
@@ -702,6 +794,7 @@ const handlers = {
       const { queue } = await getStore();
       const q = queue.find(x => x.qid === qid);
       if (!q) throw new Error("Queue item not found");
+      if (q.status === "posting" && inflight.has(q.tweetId)) throw new Error("It's posting right now. Try again in a moment.");
       Object.assign(q, patch);
       if (patch.at) Object.assign(q, { status: "scheduled", error: undefined });
       await chrome.storage.local.set({ queue: queue.sort((a, b) => a.at - b.at) });
@@ -756,11 +849,13 @@ const handlers = {
     return { ...s, ...patch };
   },
   async markPosted({ tweetId, posted }) {
-    const { liStatus = {} } = await chrome.storage.local.get("liStatus");
-    if (posted) liStatus[tweetId] = { state: "posted", at: Date.now(), manual: true };
-    else delete liStatus[tweetId];
-    await chrome.storage.local.set({ liStatus });
-    return { ok: true };
+    return recLock(async () => {
+      const { liStatus = {} } = await chrome.storage.local.get("liStatus");
+      if (posted) liStatus[tweetId] = { state: "posted", at: Date.now(), manual: true };
+      else delete liStatus[tweetId];
+      await chrome.storage.local.set({ liStatus });
+      return { ok: true };
+    });
   },
   // For the "in" button on your posts: stored copy (full text), thread parts, status
   async postBundle({ id }) {

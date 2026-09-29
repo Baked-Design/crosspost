@@ -303,9 +303,11 @@ function flyOut(dir) {
 async function reviewQueue() {
   const id = state.rCurrent;
   if (!id || $("rv").hidden) return;
+  const it = itemFor(id);
+  if (tooLong(it)) return editLong(id, it);
   try {
     await flyOut("u");
-    const r = await send({ type: "enqueue", items: [itemFor(id)] });
+    const r = await send({ type: "enqueue", items: [it] });
     toastUndo(`Queued for ${shortWhen(r.added[0].at)}`, async () => {
       await send({ type: "removeQueueItem", qid: r.added[0].qid });
       await load();
@@ -588,6 +590,14 @@ function renderBulk() {
   $("bulkN").textContent = `${n} selected`;
 }
 
+const LI_MAX = 3000;
+const tooLong = it => (it.text || "").length > LI_MAX;
+// a post over LinkedIn's limit opens in the editor with a note, instead of being cut off without telling you
+function editLong(id, it, at) {
+  if (at) state.fillAt = at;
+  openComposer(id);
+  msg("bad", `This one is ${it.text.length.toLocaleString()} characters. LinkedIn allows 3,000, so trim it here, then queue or schedule it.`);
+}
 function itemFor(id) {
   const p = state.byId.get(id);
   const parts = threadOf(p);
@@ -595,7 +605,7 @@ function itemFor(id) {
   const visual = XLIParse.visualFor(state.settings.visualMode || "auto", imgs.length > 0);
   return {
     tweetId: id,
-    text: parts.map(x => x.text).filter(Boolean).join("\n\n").slice(0, 3000),
+    text: parts.map(x => x.text).filter(Boolean).join("\n\n"),   // never cut silently: long posts go to the editor instead
     images: visual === "images" ? imgs : [],
     visual,
     cardData: visual === "card" ? XLIParse.cardDataFor({ ...p, images: (p.images || []).map(bigImg) }) : null
@@ -605,10 +615,14 @@ function itemFor(id) {
 async function quickQueue(ids) {
   try {
     const order = filteredPosts().list.map(p => p.id).filter(id => ids.includes(id));
-    const r = await send({ type: "enqueue", items: (order.length ? order : ids).map(itemFor) });
+    const all = (order.length ? order : ids).map(itemFor);
+    const ok = all.filter(it => !tooLong(it)), long = all.length - ok.length;
+    const tail = long ? ` ${long} ${long === 1 ? "is" : "are"} over LinkedIn's 3,000 characters and stayed out: open ${long === 1 ? "it" : "them"} to trim.` : "";
+    if (!ok.length) return toast(`Nothing queued.${tail}`);
+    const r = await send({ type: "enqueue", items: ok });
     state.selected.clear();
     await load();
-    toast(r.added.length > 1 ? `Queued ${r.added.length}. First goes out ${shortWhen(r.added[0].at)}` : `Queued for ${shortWhen(r.added[0].at)}`);
+    toast((r.added.length > 1 ? `Queued ${r.added.length}. First goes out ${shortWhen(r.added[0].at)}.` : `Queued for ${shortWhen(r.added[0].at)}.`) + tail);
   } catch (err) {
     toast(err.message);
   }
@@ -712,8 +726,9 @@ function suggestions(days = 70) {
 }
 
 async function acceptSuggestion(at, id) {
+  const it = itemFor(id);
+  if (tooLong(it)) return editLong(id, it, at);
   try {
-    const it = itemFor(id);
     await send({ type: "enqueue", items: [{ ...it, at }] });
     await load();
     toastUndo(`Scheduled for ${shortWhen(at)}`, async () => {
