@@ -183,6 +183,9 @@ async function fetchImageBlob(src) {
   if (src instanceof Blob) return src;
   if (typeof src !== "string") throw new Error("Bad image reference");
   if (src.startsWith("data:")) return (await fetch(src)).blob();
+  // only X's own image servers: a fake post can't make Crosspost download from anywhere else
+  let u; try { u = new URL(src); } catch (e) { throw new Error("Bad image reference"); }
+  if (u.protocol !== "https:" || !/(^|\.)twimg\.com$/.test(u.hostname)) throw new Error("That image isn't from X. Try \"Tweet card\" or \"Text only\".");
   const variants = [src];
   if (/pbs\.twimg\.com\/media\//.test(src)) {
     const base = src.split("?")[0];
