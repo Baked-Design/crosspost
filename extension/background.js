@@ -700,13 +700,61 @@ const handlers = {
       return { added, total: Object.keys(xposts).length };
     });
   },
+  // how your LinkedIn posts did, read from your activity page (li-stats.js)
+  async saveLiPosts({ posts }) {
+    return withLock(async () => {
+      const { liposts = {} } = await chrome.storage.local.get("liposts");
+      let added = 0;
+      for (const p of (posts || []).slice(0, 200)) {
+        if (!p || !/^\d{10,25}$/.test(String(p.id || ""))) continue;
+        const prev = liposts[p.id];
+        if (!prev) added++;
+        const n = k => Math.max(0, Math.min(1e9, Math.round(+p[k] || 0)));
+        liposts[p.id] = { id: String(p.id), text: String(p.text || "").slice(0, 3000), createdAt: +p.createdAt || 0, url: "https://www.linkedin.com/feed/update/urn:li:activity:" + p.id + "/",
+          likes: Math.max(n("likes"), prev?.likes || 0), comments: Math.max(n("comments"), prev?.comments || 0), reposts: Math.max(n("reposts"), prev?.reposts || 0),
+          impressions: Math.max(n("impressions"), prev?.impressions || 0), hasImage: !!p.hasImage, hasVideo: !!p.hasVideo, seenAt: Date.now() };
+      }
+      await chrome.storage.local.set({ liposts });
+      return { added, total: Object.keys(liposts).length };
+    });
+  },
+  async liImportDone({ count }) {
+    notify("LinkedIn stats read", `Read ${count || 0} posts from your LinkedIn activity. Open Insights to see how they did.`);
+    return { ok: true };
+  },
+  async startLiImport() {
+    await chrome.tabs.create({ url: "https://www.linkedin.com/in/me/recent-activity/all/#xli-li-import", active: true });
+    return { ok: true };
+  },
+  // five post ideas from Claude, built on what already worked for you
+  async postIdeas({ summary }) {
+    const s = await getSettings();
+    if (!s.anthropicKey) throw new Error("Add your Anthropic key in Settings to get ideas from Claude.");
+    let model = s.anthropicModel;
+    if (!model) { model = await pickModel(s.anthropicKey); await chrome.storage.local.set({ anthropicModel: model }); }
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": s.anthropicKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true", "content-type": "application/json" },
+      body: JSON.stringify({ model, max_tokens: 1400,
+        system: "You help a founder decide what to post next on X and LinkedIn. Use their own best posts and numbers. Write in their voice: short, direct, no hashtags, no emojis, no em dashes. " +
+          "Return ONLY a JSON array of 5 objects: {\"idea\": one line on what to post and why it should work, \"draft\": the post itself, under 280 characters, \"when\": best day and time from the data}.",
+        messages: [{ role: "user", content: String(summary || "").slice(0, 12000) }] })
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error("Claude error: " + (json.error?.message || res.status));
+    const text = json.content.filter(c => c.type === "text").map(c => c.text).join("");
+    const m = text.match(/\[[\s\S]*\]/);
+    let ideas = []; try { ideas = JSON.parse(m ? m[0] : text); } catch { throw new Error("Claude's answer didn't come back in the right shape. Try again."); }
+    return ideas.filter(x => x && x.draft).slice(0, 5).map(x => ({ idea: String(x.idea || "").slice(0, 300), draft: String(x.draft || "").slice(0, 3000), when: String(x.when || "").slice(0, 80) }));
+  },
   async getDashboard() {
     const s = await getSettings();
     const auth = await getAuth();
     const { xposts, liStatus, queue } = await getStore();
-    const { xProfile = {} } = await chrome.storage.local.get("xProfile");
+    const { xProfile = {}, liposts = {} } = await chrome.storage.local.get(["xProfile", "liposts"]);
     return {
       posts: Object.values(xposts),
+      liposts: Object.values(liposts),
       liStatus,
       queue,
       settings: s,
@@ -1001,12 +1049,16 @@ const handlers = {
 // x.com tabs (content scripts) run next to code we don't control, so they only get what they need,
 // and never your LinkedIn secret or Claude key. The dashboard and settings pages get everything.
 const FROM_X = new Set(["getSettings", "prepare", "publish", "skipped", "openOptions", "setHandle", "savePosts", "postBundle", "statusFor", "renderCard", "setProfile", "enqueue", "importFinished", "openDashboard", "verifyTweet"]);
+// LinkedIn tabs can only hand over post stats
+const FROM_LI = new Set(["saveLiPosts", "liImportDone"]);
 const stripSecrets = data => (data && data.settings ? { ...data, settings: { ...data.settings, clientSecret: data.settings.clientSecret ? "set" : "", anthropicKey: data.settings.anthropicKey ? "set" : "" } } : data);
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const h = handlers[msg?.type];
   if (!h) return false;
-  const fromTab = !String(sender.url || "").startsWith(chrome.runtime.getURL("")); // anything that isn't our own page
-  if (fromTab && !FROM_X.has(msg.type)) {
+  const url = String(sender.url || "");
+  const fromTab = !url.startsWith(chrome.runtime.getURL("")); // anything that isn't our own page
+  const allowed = /^https:\/\/(x|twitter)\.com\//.test(url) ? FROM_X : /^https:\/\/www\.linkedin\.com\//.test(url) ? FROM_LI : null;
+  if (fromTab && !(allowed && allowed.has(msg.type))) {
     sendResponse({ ok: false, error: "Not allowed from this page." });
     return false;
   }

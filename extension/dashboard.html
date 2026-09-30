@@ -117,6 +117,17 @@
     </div>
   </section>
 
+  <!-- INSIGHTS: what worked, when, and what to post next -->
+  <section class="view" id="view-insights" hidden>
+    <div class="vh">
+      <h1>Insights</h1>
+      <div class="ins-seg" id="insSeg" role="group" aria-label="Platform">
+        <button data-p="x" class="on">X</button><button data-p="li">LinkedIn</button>
+      </div>
+    </div>
+    <div id="ins"></div>
+  </section>
+
   <!-- ALL POSTS (secondary, from search) -->
   <section class="view" id="view-library" hidden>
     <div class="vh">
@@ -169,6 +180,7 @@
   <a data-view="queue" title="Queue (2)"><i data-i="list"></i><em id="nQueue"></em></a>
   <a data-view="calendar" title="Calendar (3)"><i data-i="calendar"></i></a>
   <a data-view="published" title="Posted (4)"><i data-i="check"></i></a>
+  <a data-view="insights" title="Insights (5)"><i data-i="flame"></i></a>
   <span class="dock-sep"></span>
   <button id="dockSearch" title="Search (⌘K)"><i data-i="search"></i></button>
   <button id="dockSettings" title="Settings"><i data-i="sliders"></i></button>
@@ -290,6 +302,7 @@
 <script src="icons.js"></script>
 <script src="parse.js"></script>
 <script src="slots.js"></script>
+<script src="insights.js"></script>
 <script src="dashboard.js"></script>
 </body>
 </html>

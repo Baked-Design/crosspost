@@ -105,6 +105,7 @@ async function load() {
   Object.assign(state, {
     posts: d.posts,
     liStatus: d.liStatus,
+    liposts: d.liposts || [],
     queue: d.queue,
     settings: d.settings,
     connected: d.connected,
@@ -125,8 +126,95 @@ async function load() {
   render();
 }
 
+// ---------- insights: did it reach people, when, what kind of post works, what to post next ----------
+state.insPlat = "x";
+state.insCell = null;
+state.ideas = null;
+const fmtN = n => n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M" : n >= 1e4 ? Math.round(n / 1e3) + "k" : n >= 1e3 ? (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k" : String(Math.round(n));
+function insPosts(plat) {
+  if (plat === "li") return state.liposts.map(p => ({ ...p, fit: fitOf(p).label }));
+  return state.posts.filter(p => p.kind === "post" || p.kind === "quote").map(p => ({ ...p, isThread: state.childOf.has(p.id), fit: fitOf(p).label }));
+}
+function heatColor(score) {
+  if (score == null) return "";
+  // 1× (your usual) is the middle; stronger orange above, cool grey below
+  const x = Math.max(-1, Math.min(1, Math.log2(score) / 1.6));
+  return x >= 0 ? `color-mix(in oklab, #ff5a1f ${Math.round(18 + x * 82)}%, var(--surface))` : `color-mix(in oklab, #7d8aa6 ${Math.round(12 + -x * 40)}%, var(--surface))`;
+}
+function renderInsights() {
+  document.querySelectorAll("#insSeg button").forEach(b => b.classList.toggle("on", b.dataset.p === state.insPlat));
+  const plat = state.insPlat, posts = insPosts(plat), a = XLIInsights.analyze(posts), I = XLIInsights, box = $("ins");
+  if (!a.count) {
+    box.innerHTML = plat === "li"
+      ? `<div class="calm"><h2>No LinkedIn numbers yet</h2><p>Crosspost reads reactions, comments and impressions from your LinkedIn activity page, right here in your browser. Nothing is sent anywhere.</p><div class="row center"><button class="btn primary" id="liRead"><i data-i="download"></i>Read my LinkedIn stats</button></div></div>`
+      : `<div class="calm"><h2>Bring in your X posts first</h2><p>Crosspost learns what works from posts it has seen on X.</p><div class="row center"><button class="btn primary" id="insImport"><i data-i="download"></i>Import from X</button></div></div>`;
+    XLIIcons.paint(box); bindIns(); return;
+  }
+  const M = a.metricLabel, r = a.reach;
+  const order = [1, 2, 3, 4, 5, 6, 0];   // Monday first
+  const rows = order.map(d => `<div class="hm-day">${I.DAYS[d]}</div>` + a.heat[d].map((c, h) =>
+    `<button class="hm-c${c.n ? "" : " empty"}${state.insCell && state.insCell.d === d && state.insCell.h === h ? " sel" : ""}" data-d="${d}" data-h="${h}" style="${c.n ? "background:" + heatColor(c.score) : ""}" title="${I.DAYS[d]} ${I.hourLabel(h)} · ${c.n ? c.n + " post" + (c.n === 1 ? "" : "s") + " · " + I.times(c.score) + " your usual" : "no posts"}">${c.n > 1 ? c.n : ""}</button>`).join("")).join("");
+  const hrs = `<div></div>` + Array.from({ length: 24 }, (_, h) => `<div class="hm-h">${h % 3 === 0 ? I.hourLabel(h) : ""}</div>`).join("");
+  const sel = state.insCell ? a.heat[state.insCell.d][state.insCell.h] : null;
+  const byId = new Map(posts.map(p => [p.id, p]));
+  const line = (p, v) => `<a class="ins-post" href="${esc(p.url || "#")}" target="_blank" rel="noopener"><span class="ip-t">${esc((p.text || "").slice(0, 140))}</span><span class="ip-n">${fmtN(v)} ${M}</span><span class="ip-r ${p.rel >= 1 ? "up" : "down"}">${I.times(p.rel)}</span></a>`;
+  const feat = a.features.slice(0, 8).map(f => { const w = Math.min(50, Math.abs(Math.log2(f.lift)) * 30); return `<div class="ft"><span class="ft-l">${esc(f.label)} <em>${f.n}</em></span><span class="ft-b"><i class="${f.lift >= 1 ? "up" : "down"}" style="${f.lift >= 1 ? "left:50%" : "right:50%"};width:${w}%"></i></span><span class="ft-v ${f.lift >= 1 ? "up" : "down"}">${I.times(f.lift)}</span></div>`; }).join("");
+  const posted = new Set(Object.keys(state.liStatus).filter(id => state.liStatus[id]?.state === "posted"));
+  const sug = I.suggest(a, { notOnLinkedIn: plat === "x" ? posts.map(p => p.id).filter(id => !posted.has(id)) : [] });
+  box.innerHTML = `
+    <div class="ins-kpis">
+      <div><b>${fmtN(a.count)}</b><span>posts in the last year</span></div>
+      <div><b>${fmtN(a.baseline)}</b><span>${M} on a usual post</span></div>
+      <div><b>${r.recent ? fmtN(r.median) : "–"}</b><span>usual in the last 30 days${r.trend != null ? ` <em class="${r.trend >= 0 ? "up" : "down"}">${r.trend >= 0 ? "↑" : "↓"} ${Math.abs(r.trend)}%</em>` : ""}</span></div>
+      <div><b>${r.beat != null ? r.beat + "%" : "–"}</b><span>of recent posts beat your usual</span></div>
+    </div>
+    ${a.metric === "eng" && plat === "x" ? `<p class="ins-note">No view counts yet, so this uses likes, reposts and replies. Views fill in as Crosspost sees your posts on X. <button class="linkbtn" id="insImport2">Refresh from X</button></p>` : ""}
+    <section class="ins-card">
+      <div class="ins-h"><h2>When your posts land</h2><span>Each square is an hour of the week, your time. Orange did better than your usual, grey did worse. Tap one to see the posts.</span></div>
+      <div class="hm">${hrs}${rows}</div>
+      <div class="hm-legend"><span>worse</span><i style="background:${heatColor(0.35)}"></i><i style="background:${heatColor(0.7)}"></i><i style="background:${heatColor(1)}"></i><i style="background:${heatColor(1.6)}"></i><i style="background:${heatColor(3)}"></i><span>better</span>
+        ${a.slots.length ? `<span class="hm-best">Best: ${a.slots.map(x => `${I.DAYS[x.d]} ${I.hourLabel(x.h)} <em>${I.times(x.score)}</em>`).join(" · ")}</span>` : ""}</div>
+      ${sel ? `<div class="ins-sel"><div class="ins-sub">${I.DAYS[state.insCell.d]} ${I.hourLabel(state.insCell.h)} · ${sel.n} post${sel.n === 1 ? "" : "s"}</div>${sel.ids.map(id => byId.get(id)).filter(Boolean).map(p => line({ ...p, rel: (p.views && a.metric === "views" ? p.views : p.likes + 2 * (p.reposts || 0) + 2 * (p.replies || p.comments || 0)) / a.baseline }, a.metric === "views" ? p.views : p.likes + 2 * (p.reposts || 0) + 2 * (p.replies || p.comments || 0))).join("")}</div>` : ""}
+    </section>
+    <div class="ins-grid">
+      <section class="ins-card"><div class="ins-h"><h2>What kind of post works</h2><span>${M} compared with posts without it</span></div>${feat || '<p class="ins-note">Needs a few more posts to compare.</p>'}
+        ${a.topics.length ? `<div class="ins-sub">Words in your best posts</div><div class="ins-chips">${a.topics.map(t => `<span class="ins-chip ${t.lift >= 1 ? "up" : ""}">${esc(t.t)} <em>${I.times(t.lift)}</em></span>`).join("")}</div>` : ""}</section>
+      <section class="ins-card"><div class="ins-h"><h2>Did they reach people</h2><span>Your best posts, and the ones that didn't land</span></div>${a.top.map(p => line(p, p.value)).join("")}
+        ${a.flops.length ? `<div class="ins-sub">Didn't land</div>${a.flops.map(p => line(p, p.value)).join("")}` : ""}</section>
+    </div>
+    <section class="ins-card">
+      <div class="ins-h"><h2>What to post next</h2><span>From your own numbers</span></div>
+      <ul class="ins-sug">${sug.map(x => `<li><i data-i="${x.kind === "time" ? "clock" : x.kind === "topic" ? "text" : x.kind === "repost" ? "send" : x.kind === "reach" ? "eye" : "sparkles"}"></i><span>${esc(x.text)}</span>${x.ids ? `<button class="btn sm" data-queue-ids="${esc(x.ids.join(","))}">Queue</button>` : ""}</li>`).join("")}</ul>
+      <div class="row"><button class="btn" id="insIdeas"><i data-i="sparkles"></i>${state.ideas ? "5 more ideas" : "Get 5 post ideas from Claude"}</button>${plat === "li" ? `<button class="btn ghost" id="liRead"><i data-i="download"></i>Refresh LinkedIn stats</button>` : ""}</div>
+      ${state.ideas ? `<div class="ideas">${state.ideas.map((x, i) => `<div class="idea"><div class="idea-w">${esc(x.idea)}${x.when ? ` <em>${esc(x.when)}</em>` : ""}</div><p>${esc(x.draft)}</p><div class="row"><button class="btn sm" data-copy="${i}">Copy</button><a class="btn sm ghost" target="_blank" rel="noopener" href="https://x.com/intent/post?text=${encodeURIComponent(x.draft)}">Post on X</a></div></div>`).join("")}</div>` : ""}
+    </section>`;
+  XLIIcons.paint(box); bindIns(a, posts);
+}
+function bindIns(a, posts) {
+  const box = $("ins");
+  box.querySelectorAll(".hm-c").forEach(b => b.onclick = () => { const d = +b.dataset.d, h = +b.dataset.h; state.insCell = state.insCell && state.insCell.d === d && state.insCell.h === h ? null : { d, h }; renderInsights(); });
+  const imp = () => startImport();
+  if ($("insImport")) $("insImport").onclick = imp;
+  if ($("insImport2")) $("insImport2").onclick = imp;
+  if ($("liRead")) $("liRead").onclick = async () => { try { await send({ type: "startLiImport" }); toast("Opened your LinkedIn activity. Leave it for a minute while it scrolls, then come back."); } catch (e) { toast(e.message); } };
+  box.querySelectorAll("[data-queue-ids]").forEach(b => b.onclick = () => quickQueue(b.dataset.queueIds.split(",")));
+  box.querySelectorAll("[data-copy]").forEach(b => b.onclick = async () => { try { await navigator.clipboard.writeText(state.ideas[+b.dataset.copy].draft); toast("Copied"); } catch { toast("Couldn't copy"); } });
+  if ($("insIdeas")) $("insIdeas").onclick = async () => {
+    const btn = $("insIdeas"); btn.disabled = true; btn.textContent = "Thinking…";
+    const I = XLIInsights, sug = I.suggest(a);
+    const summary = `Platform: ${state.insPlat === "li" ? "LinkedIn" : "X"}. Usual post gets ${Math.round(a.baseline)} ${a.metricLabel}.\n` +
+      `Best times: ${a.slots.map(x => I.DAYS[x.d] + " " + I.hourLabel(x.h) + " (" + I.times(x.score) + ")").join(", ") || "not enough data"}.\n` +
+      `What works: ${a.features.slice(0, 5).map(f => f.label + " " + I.times(f.lift)).join("; ")}.\nTopics that land: ${a.topics.map(t => t.t).join(", ")}.\n` +
+      `Notes: ${sug.map(x => x.text).join(" ")}\n\nBest posts:\n${a.top.map(p => "- (" + I.times(p.rel) + ") " + p.text.slice(0, 500)).join("\n")}\n\nPosts that didn't land:\n${a.flops.map(p => "- " + p.text.slice(0, 300)).join("\n")}`;
+    try { const r = await send({ type: "postIdeas", summary }); if (!r) throw new Error("Claude didn't answer. Check your Anthropic key in Settings."); state.ideas = r; }
+    catch (e) { toast(e.message || String(e)); }
+    renderInsights();
+  };
+}
+document.querySelectorAll("#insSeg button").forEach(b => b.addEventListener("click", () => { state.insPlat = b.dataset.p; state.insCell = null; state.ideas = null; renderInsights(); }));
+
 // ---------- shell ----------
-const VIEWS = ["review", "queue", "calendar", "published", "library"];
+const VIEWS = ["review", "queue", "calendar", "published", "insights", "library"];
 function go(view) {
   if (view === "settings") return openSettings();
   state.view = view;
@@ -153,6 +241,7 @@ function render() {
   if (state.view === "queue") renderQueue();
   if (state.view === "published") renderPublished();
   if (state.view === "calendar") renderCalendar();
+  if (state.view === "insights") renderInsights();
   renderBulk();
   if (state.current) renderComposerStatus();
 }
@@ -1552,6 +1641,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "2") go("queue");
   if (e.key === "3") go("calendar");
   if (e.key === "4") go("published");
+  if (e.key === "5") go("insights");
 });
 
 // live refresh when the background changes things

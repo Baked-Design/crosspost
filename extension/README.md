@@ -62,6 +62,17 @@ Review, Queue and Calendar only suggest posts that fit LinkedIn. Personal stuff 
 - **Live posts:** when a new X post looks personal, the pop-up asks before posting. You can set it to always skip or always post.
 - **Library** hides personal posts by default. Untick "Hide personal posts" in the filter to see them.
 
+## Insights (v1.10)
+
+Press **5** (or the flame in the dock). For X and LinkedIn:
+
+- **When your posts land**: a heat map of every hour of the week, in your time. Orange did better than your usual post, grey did worse. Tap a square to see those posts.
+- **What kind of post works**: photos, numbers, lists, questions, length, work vs personal, and the words in your best posts, each compared with posts without it.
+- **Did they reach people**: your usual views, the last 30 days vs before, your best posts and the ones that didn't land.
+- **What to post next**: best times, formats and topics from your own numbers, best X posts not on LinkedIn yet (one tap to queue), and 5 draft ideas from Claude if you've added an Anthropic key.
+
+LinkedIn numbers come from your own activity page: tap **Read my LinkedIn stats** and Crosspost scrolls it and reads reactions, comments, reposts and impressions. Everything stays in your browser.
+
 ## Dashboard (old posts + scheduler)
 Click the extension icon to open it.
 - **Import from X** opens your profile and auto-scrolls to save your posts (hit Stop anytime). Your posts also get saved in the background whenever you browse X.
