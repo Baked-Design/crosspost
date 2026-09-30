@@ -20,6 +20,9 @@
   .sec-h h2 { margin: 0; font-family: var(--display); font-weight: 400; font-size: 18px; letter-spacing: -0.015em; }
   .sec-h p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
   .sec .panel { padding: 16px 18px; }
+  .about { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .about b { display: block; font-size: 15px; }
+  .about span { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
   .sec .panel > .lbl:first-child { margin-top: 0; }
   .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .two .lbl { margin-top: 14px; }
@@ -68,7 +71,7 @@
   <header class="ph">
     <div>
       <h1>Settings</h1>
-      <p>Everything is stored only in this browser.</p>
+      <p>Everything is stored only in this browser. <span id="ver"></span></p>
     </div>
     <a class="btn standalone" href="dashboard.html">Open dashboard</a>
   </header>
@@ -179,6 +182,11 @@
         <textarea class="input" id="rewriteInstructions" rows="8"></textarea>
       </div>
     </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-h"><h2>About</h2><p>Which Crosspost this is, and where it runs from.</p></div>
+    <div class="panel about"><div><b id="verBig"></b><span id="verFrom"></span></div><a class="btn" id="verCheck" target="_blank" rel="noopener" href="https://github.com/Baked-Design/crosspost/releases/latest">Check for updates</a></div>
   </section>
 
   <section class="sec">

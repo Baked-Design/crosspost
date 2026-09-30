@@ -159,3 +159,13 @@ chrome.storage.onChanged.addListener(changes => {
 });
 
 init();
+
+// which version this is: after an update, reload the extension and this number changes
+(() => {
+  const v = chrome.runtime.getManifest().version;
+  document.getElementById("ver").textContent = "Crosspost " + v;
+  document.getElementById("verBig").textContent = "Crosspost " + v;
+  chrome.management && chrome.management.getSelf
+    ? chrome.management.getSelf(info => { document.getElementById("verFrom").textContent = info && info.installType === "development" ? "Loaded from a folder on this computer. Reload it in chrome://extensions after an update." : ""; })
+    : null;
+})();

@@ -341,3 +341,16 @@ body.dragging .slot-open, body.dragging .chip.open, body.dragging .cal-day:not(.
 .rt-opt span { font-size: 12.5px; color: var(--muted); }
 .rt-opt em { font-style: normal; color: #e0521b; font-weight: 600; }
 .sched-best { margin: 6px 0 0; font-size: 12px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* caught up with cards: start near the top, keep the dock clear, small buttons */
+.calm.has-more { padding-top: 2vh; }
+.calm.has-more h2 { font-size: 30px; }
+.calm.has-more p { margin-bottom: 0; }
+.cu { margin: 24px auto 0; }
+.calm .cu .btn { height: 30px; padding: 0 12px; border-radius: 8px; font-size: 12.5px; }
+.cu-row .btn { flex: none; }
+@media (max-width: 760px) { .calm.has-more { padding-top: 0; } .calm.has-more h2 { font-size: 26px; } }
+.cu-card { min-width: 0; align-items: stretch; }
+.cu-card > .linkbtn, .cu-card > .row, .cu-card > .btn { align-self: flex-start; }
+.cu-row { min-width: 0; }
+.calm .cu-note { text-align: left; max-width: none; margin: 0; font-size: 13px; }
+.cu { width: 100%; max-width: 760px; }

@@ -841,6 +841,7 @@ $("fillCancel").onclick = () => {
 // all caught up: what's coming, what you skipped that did well, how far back your posts go
 function renderCaughtUp(hasPosts) {
   const box = $("rvMore");
+  $("rvEmpty").classList.toggle("has-more", !!hasPosts);
   if (!hasPosts) { box.innerHTML = ""; return; }
   const mine = state.posts.filter(p => p.kind === "post" || p.kind === "quote" || p.kind === "thread");
   const oldest = mine.reduce((m, p) => (p.createdAt && p.createdAt < m ? p.createdAt : m), Date.now());
