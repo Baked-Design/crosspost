@@ -84,6 +84,13 @@ Calendar opens on **Week**: one column per day, each post as a card with its pho
 - A heads-up when three posts in a row are about the same thing.
 - Drag a post onto a day and it lands on that day's best hour. Month view is still one tap away.
 
+## How best times are picked (v1.14)
+
+- Every post is scored against your usual post (70% views, 30% likes + reposts + replies), not raw numbers.
+- Any single post counts as at most 5x your usual, and times with few posts are pulled toward normal, so one viral post can't pick your times.
+- A time needs 3+ posts behind it, and nothing is suggested until there are about 20 settled posts (X: a day old, LinkedIn: three days old).
+- LinkedIn posts are scheduled from your LinkedIn numbers once you have about 15 with stats; until then, your X numbers.
+
 ## Better times (v1.11)
 
 - **Calendar → Better times**: three one-tap fixes for what's already scheduled, each with undo:

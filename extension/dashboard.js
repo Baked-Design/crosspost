@@ -131,6 +131,8 @@ state.insPlat = "x";
 state.insCell = null;
 state.ideas = null;
 const fmtN = n => n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M" : n >= 1e4 ? Math.round(n / 1e3) + "k" : n >= 1e3 ? (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k" : String(Math.round(n));
+// X posts are judged after a day; LinkedIn posts keep growing for days, so they get three
+const OPTS = { x: { settleDays: 1, minPosts: 20 }, li: { settleDays: 3, minPosts: 15 } };
 function insPosts(plat) {
   if (plat === "li") return state.liposts.map(p => ({ ...p, fit: fitOf(p).label }));
   return state.posts.filter(p => p.kind === "post" || p.kind === "quote").map(p => ({ ...p, isThread: state.childOf.has(p.id), fit: fitOf(p).label }));
@@ -160,7 +162,7 @@ function slidePill(seg) {
 function renderInsights() {
   document.querySelectorAll("#insSeg button").forEach(b => b.classList.toggle("on", b.dataset.p === state.insPlat));
   slidePill($("insSeg"));
-  const plat = state.insPlat, posts = insPosts(plat), a = XLIInsights.analyze(posts), I = XLIInsights, box = $("ins");
+  const plat = state.insPlat, posts = insPosts(plat), a = XLIInsights.analyze(posts, OPTS[plat]), I = XLIInsights, box = $("ins");
   if (!a.count) {
     box.innerHTML = plat === "li"
       ? `<div class="calm"><h2>No LinkedIn numbers yet</h2><p>Crosspost reads reactions, comments and impressions from your LinkedIn activity page, right here in your browser. Nothing is sent anywhere.</p><div class="row center"><button class="btn primary" id="liRead"><i data-i="download"></i>Read my LinkedIn stats</button></div></div>`
@@ -190,7 +192,7 @@ function renderInsights() {
       <div class="ins-h"><h2>When your posts land</h2><span>Each square is an hour of the week, your time. Orange did better than your usual, grey did worse. Tap one to see the posts.</span></div>
       <div class="hm">${hrs}${rows}</div>
       <div class="hm-legend"><span>worse</span><i style="background:${heatColor(0.35)}"></i><i style="background:${heatColor(0.7)}"></i><i style="background:${heatColor(1)}"></i><i style="background:${heatColor(1.6)}"></i><i style="background:${heatColor(3)}"></i><span>better</span>
-        ${a.slots.length ? `<span class="hm-best">Best: ${a.slots.map(x => `${I.DAYS[x.d]} ${I.hourLabel(x.h)} <em>${I.times(x.score)}</em>`).join(" · ")}</span>` : ""}</div>
+        ${a.slots.length ? `<span class="hm-best">Best: ${a.slots.map(x => `${I.DAYS[x.d]} ${I.hourLabel(x.h)} <em>${I.times(x.score)}</em>`).join(" · ")}</span>` : !a.ready ? `<span class="hm-best">Still learning your best times: ${a.need} more post${a.need === 1 ? "" : "s"} to go</span>` : ""}</div>
       ${sel ? `<div class="ins-sel"><div class="ins-sub">${I.DAYS[state.insCell.d]} ${I.hourLabel(state.insCell.h)} · ${sel.n} post${sel.n === 1 ? "" : "s"}</div>${sel.ids.map(id => byId.get(id)).filter(Boolean).map(p => line({ ...p, rel: (p.views && a.metric === "views" ? p.views : p.likes + 2 * (p.reposts || 0) + 2 * (p.replies || p.comments || 0)) / a.baseline }, a.metric === "views" ? p.views : p.likes + 2 * (p.reposts || 0) + 2 * (p.replies || p.comments || 0))).join("")}</div>` : ""}
     </section>
     <div class="ins-grid">
@@ -233,17 +235,23 @@ function bindIns(a, posts) {
 document.querySelectorAll("#insSeg button").forEach(b => b.addEventListener("click", () => { state.insPlat = b.dataset.p; state.insCell = null; state.ideas = null; renderInsights(); }));
 
 // ---------- calendar: better times for what's already scheduled ----------
-let xCache = null;
+let xCache = null, liCache = null;
 function xAnalysis() {
   const key = state.posts.length + ":" + state.posts.reduce((t, p) => t + (p.views || 0), 0);
-  if (!xCache || xCache.key !== key) xCache = { key, a: XLIInsights.analyze(insPosts("x")) };
+  if (!xCache || xCache.key !== key) xCache = { key, a: XLIInsights.analyze(insPosts("x"), OPTS.x) };
   return xCache.a;
+}
+// the times we schedule LinkedIn posts at: your LinkedIn numbers once there are enough, your X numbers until then
+function schedAnalysis() {
+  const key = state.liposts.length + ":" + state.liposts.reduce((t, p) => t + (p.impressions || p.likes || 0), 0);
+  if (!liCache || liCache.key !== key) liCache = { key, a: XLIInsights.analyze(insPosts("li"), OPTS.li) };
+  return liCache.a.ready ? liCache.a : xAnalysis();
 }
 // 9:00 -> 9:17: a steady minute per post, never a round number
 function naturalMinute(seed) { let h = 2166136261; for (const c of String(seed)) h = Math.imul(h ^ c.charCodeAt(0), 16777619); h = Math.imul(h ^ (h >>> 15), 2246822507); let m = 3 + ((h >>> 0) % 54); if (m % 5 === 0) m += 2; return m; }
 function atHour(ts, hour, seed) { const d = new Date(ts); d.setHours(hour, naturalMinute(seed), 0, 0); return d.getTime(); }
 function retimePlans() {
-  const now = Date.now() + 5 * 60e3, a = xAnalysis();
+  const now = Date.now() + 5 * 60e3, a = schedAnalysis();
   const future = state.queue.filter(q => q.status !== "posting" && q.status !== "posted" && q.at > now).sort((x, y) => x.at - y.at);
   // 1. same day and hour, natural minute
   const natural = future.filter(q => new Date(q.at).getMinutes() % 5 === 0).map(q => ({ qid: q.qid, at: atHour(q.at, new Date(q.at).getHours(), q.qid) })).filter(c => c.at > now);
@@ -866,7 +874,7 @@ function renderCaughtUp(hasPosts) {
   const oldest = mine.reduce((m, p) => (p.createdAt && p.createdAt < m ? p.createdAt : m), Date.now());
   const since = new Date(oldest).toLocaleDateString(undefined, { month: "short", year: "numeric" });
   const next = state.queue.filter(q => q.status !== "posted").slice(0, 3);
-  const a = XLIInsights.analyze(insPosts("x"));
+  const a = XLIInsights.analyze(insPosts("x"), OPTS.x);
   const relOf = new Map(); if (a.count) { const M = a.metric === "views" ? p => p.views || 0 : p => (p.likes || 0) + 2 * (p.reposts || 0) + 2 * (p.replies || 0); for (const p of mine) relOf.set(p.id, M(p) / a.baseline); }
   const good = [...state.skipped].map(id => state.byId.get(id)).filter(p => p && (relOf.get(p.id) || 0) >= 1.5).sort((x, y) => relOf.get(y.id) - relOf.get(x.id)).slice(0, 3);
   const best = a.slots && a.slots[0];
@@ -1191,11 +1199,11 @@ function renderSchedule() {
   if (document.activeElement !== $("slotTimes")) $("slotTimes").value = s.slotTimes || XLISlots.DEFAULT_TIMES;
   $("perDay").querySelectorAll("button").forEach(b => b.classList.toggle("on", +b.dataset.n === wins.length));
   $("slotNatural").checked = s.slotNatural !== false;
-  const bw = XLIInsights.bestWindows(xAnalysis(), Math.max(1, Math.min(4, wins.length || 1)));
+  const bw = XLIInsights.bestWindows(schedAnalysis(), Math.max(1, Math.min(4, wins.length || 1)));
   $("schedBest").hidden = !bw;
   if (bw) {
     const same = (s.slotTimes || "").replace(/\s/g, "") === bw.text.replace(/\s/g, "");
-    $("schedBest").innerHTML = `<span>From your heat map: ${esc(bw.windows.map(w => XLIInsights.hourLabel(w.h) + "–" + XLIInsights.hourLabel((w.h + 2) % 24)).join(", "))}</span>${same ? "<em>in use</em>" : '<button class="linkbtn" id="useBest">Use my best times</button>'}`;
+    $("schedBest").innerHTML = `<span>From your ${liCache && liCache.a.ready ? "LinkedIn" : "X"} numbers: ${esc(bw.windows.map(w => XLIInsights.hourLabel(w.h) + "–" + XLIInsights.hourLabel((w.h + 2) % 24)).join(", "))}</span>${same ? "<em>in use</em>" : '<button class="linkbtn" id="useBest">Use my best times</button>'}`;
     if ($("useBest")) $("useBest").onclick = () => saveSchedule({ slotTimes: bw.text, slotNatural: true }, "Posting at your best times now");
   }
   const days = new Set((s.slotDays || []).map(Number));
@@ -1229,7 +1237,7 @@ async function saveSchedule(patch, note) {
 $("perDay").addEventListener("click", e => {
   const b = e.target.closest("button");
   // your best hours when there's enough data, otherwise sensible defaults
-  const bw = b && XLIInsights.bestWindows(xAnalysis(), +b.dataset.n);
+  const bw = b && XLIInsights.bestWindows(schedAnalysis(), +b.dataset.n);
   if (b) saveSchedule({ slotTimes: bw ? bw.text : XLISlots.PRESETS[b.dataset.n] }, `${b.dataset.n} a day${bw ? ", at your best hours" : ""}`);
 });
 $("slotTimes").addEventListener("change", e => saveSchedule({ slotTimes: e.target.value.trim() }, "Posting times saved"));
@@ -1402,7 +1410,7 @@ function scoreTag(sc) {
 }
 function topicKey(t) { const w = normT(t).split(" ").filter(x => x.length > 3 && !/^(this|that|with|from|have|just|your|what|about|been|were|they|them|will|into|more|some)$/.test(x)); return w.slice(0, 2).join(" "); }
 function renderWeek() {
-  const a = xAnalysis(), I = XLIInsights, now = Date.now();
+  const a = schedAnalysis(), I = XLIInsights, now = Date.now();
   const base = new Date(); base.setHours(0, 0, 0, 0); base.setDate(base.getDate() - ((base.getDay() + 6) % 7) + cal.week * 7);
   const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(base); d.setDate(d.getDate() + i); return d; });
   const start = days[0].getTime(), end = days[6].getTime() + 864e5;

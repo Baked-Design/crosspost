@@ -35,42 +35,53 @@
     return withViews >= Math.max(3, list.length * 0.5) ? { key: "views", label: "views", get: p => p.views } : { key: "eng", label: "engagement", get: p => p.eng };
   }
 
-  function analyze(raw, { now = Date.now(), days = 365 } = {}) {
+  // one viral post shouldn't pick your times: cap any post at 5x your usual, and pull thin slots toward "normal"
+  // until there are enough posts behind them (a slot with 2 posts can't outvote one with 12)
+  const CAP = 5, PRIOR = 2;
+  const steady = vals => { const v = vals.map(x => Math.min(x, CAP)); return v.length ? (median(v) * v.length + PRIOR) / (v.length + PRIOR) : null; };
+
+  // settleDays: how long a post keeps growing before we judge it (X: a day, LinkedIn: about three)
+  // minPosts: how many settled posts before we trust best times at all
+  function analyze(raw, { now = Date.now(), days = 365, settleDays = 1, minPosts = 20 } = {}) {
     const list = raw.map(prep).filter(p => p.createdAt && p.createdAt > now - days * DAY && p.createdAt <= now);
     const out = { count: list.length, metric: null, baseline: 0, heat: [], slots: [], reach: null, features: [], topics: [], top: [], flops: [], hourly: [], daily: [] };
     if (!list.length) return out;
     const M = metricOf(list);
     out.metric = M.key; out.metricLabel = M.label;
     // newer posts haven't finished getting views: judge posts at least a day old
-    const settled = list.filter(p => p.createdAt < now - DAY);
-    const base = median((settled.length >= 5 ? settled : list).map(M.get)) || 1;
+    const settled = list.filter(p => p.createdAt < now - settleDays * DAY);
+    const pool = settled.length >= 5 ? settled : list;
+    const base = median(pool.map(M.get)) || 1;
     out.baseline = base;
-    for (const p of list) p.rel = M.get(p) / base;
+    // reach first, but a post with fewer views and lots of replies still counts: 70% views, 30% likes + reposts + replies
+    const engBase = M.key === "views" ? median(pool.map(p => p.eng)) : 0;
+    for (const p of list) p.rel = engBase > 0 ? 0.7 * (M.get(p) / base) + 0.3 * (p.eng / engBase) : M.get(p) / base;
+    out.ready = settled.length >= minPosts; out.need = Math.max(0, minPosts - settled.length); out.settled = settled.length;
     const judged = settled.length >= 5 ? settled : list;
 
     // heat map: 7 days x 24 hours, in your time zone. Each cell: posts, and how they did vs your usual
     const cell = () => ({ n: 0, rels: [], ids: [] });
     const grid = Array.from({ length: 7 }, () => Array.from({ length: 24 }, cell));
     for (const p of judged) { const d = new Date(p.createdAt), c = grid[d.getDay()][d.getHours()]; c.n++; c.rels.push(p.rel); c.ids.push(p.id); }
-    out.heat = grid.map(row => row.map(c => ({ n: c.n, score: c.n ? median(c.rels) : null, ids: c.ids })));
-    out.hourly = Array.from({ length: 24 }, (_, h) => { const r = grid.flatMap(row => row[h].rels); return { h, n: r.length, score: r.length ? median(r) : null }; });
-    out.daily = grid.map((row, d) => { const r = row.flatMap(c => c.rels); return { d, n: r.length, score: r.length ? median(r) : null }; });
-    // best times: 2-hour windows with at least 2 posts, best median first
+    out.heat = grid.map(row => row.map(c => ({ n: c.n, score: c.n ? steady(c.rels) : null, ids: c.ids })));
+    out.hourly = Array.from({ length: 24 }, (_, h) => { const r = grid.flatMap(row => row[h].rels); return { h, n: r.length, score: r.length ? steady(r) : null }; });
+    out.daily = grid.map((row, d) => { const r = row.flatMap(c => c.rels); return { d, n: r.length, score: r.length ? steady(r) : null }; });
+    // best times: 2-hour windows with at least 3 posts, best first (only once there's enough history)
     const slots = [];
     for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) {
       if (!grid[d][h].n) continue;   // a window starts at an hour you actually posted
       const r = [...grid[d][h].rels, ...grid[d][(h + 1) % 24].rels];
-      if (r.length >= 2) slots.push({ d, h, n: r.length, score: median(r) });
+      if (r.length >= 3) slots.push({ d, h, n: r.length, score: steady(r) });
     }
     slots.sort((a, b) => b.score - a.score || b.n - a.n);
     const picked = [];
     for (const s of slots) { if (picked.some(x => x.d === s.d && Math.abs(x.h - s.h) < 2)) continue; picked.push(s); if (picked.length >= 3) break; }
-    out.slots = picked;
+    out.slots = out.ready ? picked : [];
     // any day: best hours across the week
     const hours = [];
-    for (let h = 0; h < 24; h++) { if (!out.hourly[h].n) continue; const r = [...grid.flatMap(row => row[h].rels), ...grid.flatMap(row => row[(h + 1) % 24].rels)]; if (r.length >= 3) hours.push({ h, n: r.length, score: median(r) }); }
+    for (let h = 0; h < 24; h++) { if (!out.hourly[h].n) continue; const r = [...grid.flatMap(row => row[h].rels), ...grid.flatMap(row => row[(h + 1) % 24].rels)]; if (r.length >= 3) hours.push({ h, n: r.length, score: steady(r) }); }
     hours.sort((a, b) => b.score - a.score);
-    out.bestHours = hours.slice(0, 2);
+    out.bestHours = out.ready ? hours.slice(0, 2) : [];
 
     // reach: the last 30 days vs the 60 before, and how many beat your usual
     const recent = judged.filter(p => p.createdAt > now - 31 * DAY), before = judged.filter(p => p.createdAt <= now - 31 * DAY && p.createdAt > now - 91 * DAY);
@@ -128,7 +139,7 @@
   // your n best 2-hour windows across the week (hours that did best, 3+ posts behind each), as a schedule
   // like "09:00-11:00, 20:00-22:00". null when there isn't enough data to trust.
   function bestWindows(a, n = 2) {
-    if (!a || !a.hourly) return null;
+    if (!a || !a.hourly || !a.ready) return null;
     const pad = h => String(h).padStart(2, "0") + ":00";
     const ranked = [];
     for (let h = 0; h < 23; h++) {
@@ -145,8 +156,8 @@
   }
   // the best hour to post on a given weekday: that day's own numbers when there are enough, else the week's
   function bestHourOn(a, day) {
-    if (!a || !a.heat || !a.heat.length) return null;
-    const row = a.heat[day].map((c, h) => ({ h, n: c.n, score: c.score })).filter(c => c.n >= 2).sort((x, y) => y.score - x.score)[0];
+    if (!a || !a.heat || !a.heat.length || !a.ready) return null;
+    const row = a.heat[day].map((c, h) => ({ h, n: c.n, score: c.score })).filter(c => c.n >= 3).sort((x, y) => y.score - x.score)[0];
     if (row) return row.h;
     const any = a.hourly.filter(x => x.n >= 3).sort((x, y) => y.score - x.score)[0];
     return any ? any.h : null;
