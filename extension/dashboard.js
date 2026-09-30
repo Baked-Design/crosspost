@@ -1249,8 +1249,14 @@ function renderPublished() {
 }
 
 // ---------- calendar ----------
-const cal = { y: new Date().getFullYear(), m: new Date().getMonth() };
+const cal = { y: new Date().getFullYear(), m: new Date().getMonth(), mode: "week", week: 0 };
+try { const m = localStorage.getItem("calMode"); if (m === "month" || m === "week") cal.mode = m; } catch {}
 function renderCalendar() {
+  document.querySelectorAll("#calMode button").forEach(b => b.classList.toggle("on", b.dataset.m === cal.mode));
+  $("cal").hidden = cal.mode === "week";
+  document.querySelector(".cal-legend").hidden = cal.mode === "week";
+  $("wkv").hidden = cal.mode !== "week";
+  if (cal.mode === "week") return renderWeek();
   const first = new Date(cal.y, cal.m, 1);
   const start = new Date(first);
   start.setDate(1 - ((first.getDay() + 6) % 7)); // Monday on or before the 1st
@@ -1356,17 +1362,107 @@ function renderCalendar() {
     })
   );
 }
+// ---------- the week board: what's going out, how it did, and how good each slot is ----------
+const normT = t => String(t || "").toLowerCase().replace(/https?:\/\/\S+/g, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim().slice(0, 60);
+function liStatsByText() { const m = new Map(); for (const p of state.liposts || []) { const k = normT(p.text); if (k) m.set(k, p); } return m; }
+function slotScore(a, ts) {
+  if (!a.count) return null;
+  const d = new Date(ts), c = a.heat[d.getDay()][d.getHours()];
+  if (c && c.n >= 2) return c.score;
+  const h = a.hourly[d.getHours()];
+  return h && h.n >= 3 ? h.score : null;
+}
+function scoreTag(sc) {
+  if (sc == null) return "";
+  const cls = sc >= 1.5 ? "hot" : sc >= 0.9 ? "ok" : "cold";
+  const word = sc >= 1.5 ? "Great slot" : sc >= 0.9 ? "Good slot" : "Quiet slot";
+  return `<span class="wk-slot ${cls}" title="Posts at this hour do ${XLIInsights.times(sc)} your usual on X">${word} · ${XLIInsights.times(sc)}</span>`;
+}
+function topicKey(t) { const w = normT(t).split(" ").filter(x => x.length > 3 && !/^(this|that|with|from|have|just|your|what|about|been|were|they|them|will|into|more|some)$/.test(x)); return w.slice(0, 2).join(" "); }
+function renderWeek() {
+  const a = xAnalysis(), I = XLIInsights, now = Date.now();
+  const base = new Date(); base.setHours(0, 0, 0, 0); base.setDate(base.getDate() - ((base.getDay() + 6) % 7) + cal.week * 7);
+  const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(base); d.setDate(d.getDate() + i); return d; });
+  const start = days[0].getTime(), end = days[6].getTime() + 864e5;
+  $("calTitle").textContent = cal.week === 0 ? "This week" : cal.week === 1 ? "Next week" : cal.week === -1 ? "Last week" : days[0].toLocaleDateString(undefined, { month: "short", day: "numeric" }) + " – " + days[6].toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const li = liStatsByText();
+  const M = a.metric === "views" ? p => p.views || 0 : p => (p.likes || 0) + 2 * (p.reposts || 0) + 2 * (p.replies || 0);
+  const items = [];
+  for (const [id, st] of Object.entries(state.liStatus)) if (st.state === "posted" && st.at >= start && st.at < end) items.push({ kind: "posted", at: st.at, id, text: st.text || state.byId.get(id)?.text || "", url: st.url });
+  for (const q of state.queue) if (q.at >= start && q.at < end) items.push({ kind: q.status === "failed" ? "failed" : "sched", at: q.at, id: q.tweetId, qid: q.qid, text: q.text, images: q.images });
+  // open slots, each with the post that would fit best: what you haven't reviewed, else what you skipped that did well on X
+  const pool = reviewList().slice();
+  const strong = [...state.skipped].map(id => state.byId.get(id)).filter(p => p && a.count && M(p) / a.baseline >= 1.5).sort((x, y) => M(y) - M(x));
+  for (const sl of XLISlots.between(Math.max(start, now + 60000), end, state.settings)) if (!XLISlots.taken(sl, state.queue)) items.push({ kind: "open", at: sl.at, pick: pool.shift() || strong.shift() || null });
+  items.sort((x, y) => x.at - y.at);
+  // the week in numbers
+  const out = items.filter(x => x.kind === "posted" || x.kind === "sched" || x.kind === "failed");
+  const xReach = out.reduce((t, x) => t + M(state.byId.get(x.id) || {}), 0);
+  const liReach = out.reduce((t, x) => t + ((li.get(normT(x.text)) || {}).impressions || 0), 0);
+  const fits = out.map(x => { const p = state.byId.get(x.id); return p ? fitOf(p).label : "unclear"; });
+  const photos = out.filter(x => (x.images && x.images.length) || (state.byId.get(x.id)?.images || []).length).length;
+  // same topic three times in a row reads as repetitive on LinkedIn
+  let repeat = null; for (let i = 2; i < out.length; i++) { const k = topicKey(out[i].text); if (k && k === topicKey(out[i - 1].text) && k === topicKey(out[i - 2].text)) { repeat = k; break; } }
+  const target = state.rhythm?.target || 3;
+  const head = `<div class="wk-stats">
+      <div><b>${out.length}<em>/${target}</em></b><span>posts this week</span></div>
+      <div><b>${fmtN(xReach)}</b><span>${a.metricLabel || "views"} they got on X</span></div>
+      <div><b>${liReach ? fmtN(liReach) : "–"}</b><span>LinkedIn impressions so far</span></div>
+      <div class="wk-mix"><span class="mix">${["work", "personal", "unclear"].map(k => { const n = fits.filter(f => f === k).length; return n ? `<i class="mx ${k}" style="flex:${n}"></i>` : ""; }).join("")}</span><span>${fits.filter(f => f === "work").length} work · ${fits.filter(f => f === "personal").length} personal · ${photos} with photos</span></div>
+    </div>${repeat ? `<p class="wk-warn">Three posts in a row about “${esc(repeat)}”. Swap one for something different so LinkedIn doesn't see the same thing three days running.</p>` : ""}`;
+  const col = d => {
+    const k = d.toDateString(), mine = items.filter(x => new Date(x.at).toDateString() === k), isToday = k === new Date().toDateString(), past = d.getTime() + 864e5 < now;
+    const best = a.count ? I.bestHourOn(a, d.getDay()) : null;
+    const strip = a.count ? a.heat[d.getDay()].map((c, h) => `<i style="${c.n ? "background:" + heatColor(c.score) : ""}" title="${I.hourLabel(h)}${c.n ? " · " + I.times(c.score) : ""}"></i>`).join("") : "";
+    const card = x => {
+      const p = x.kind === "open" ? x.pick : state.byId.get(x.id);
+      const img = (x.images && x.images[0]) || (p && p.images && p.images[0]);
+      const time = fmtTime(x.at).replace(" ", "").toLowerCase();
+      if (x.kind === "open") return `<div class="wk-card open" data-k="open" data-at="${x.at}"><div class="wk-top"><span class="wk-time">${time}</span>${scoreTag(slotScore(a, x.at))}</div>${p ? `<div class="wk-txt">${esc((p.text || "").slice(0, 110))}</div><div class="wk-data">${M(p) ? `<span>${fmtN(M(p))} ${a.metricLabel || "views"} on X</span>` : ""}</div><div class="wk-acts"><button class="btn sm" data-fill="${esc(p.id)}" data-at="${x.at}">Schedule this</button><button class="linkbtn" data-pick="${x.at}">Pick another</button></div>` : `<div class="wk-empty">Open slot</div><div class="wk-acts"><button class="linkbtn" data-pick="${x.at}">Pick a post</button></div>`}</div>`;
+      const s = li.get(normT(x.text)), fit = p ? fitOf(p).label : "", xs = p ? M(p) : 0;
+      return `<div class="wk-card ${x.kind}" data-k="${x.kind}" data-id="${esc(x.id || "")}" data-at="${x.at}"${x.qid ? ` data-qid="${esc(x.qid)}" draggable="true"` : ""}>
+        ${img ? `<div class="wk-img" style="background-image:url('${esc(img)}')"></div>` : ""}
+        <div class="wk-top"><span class="wk-time">${time}</span>${x.kind === "posted" ? '<span class="wk-pill ok">Posted</span>' : x.kind === "failed" ? '<span class="wk-pill bad">Failed</span>' : scoreTag(slotScore(a, x.at))}</div>
+        <div class="wk-txt">${esc((x.text || "").replace(/\s+/g, " ").slice(0, 140))}</div>
+        <div class="wk-data">${xs ? `<span title="How it did on X">${icon("eye")}${fmtN(xs)} on X</span>` : ""}${s ? `<span title="LinkedIn">${icon("like")}${s.likes} · ${fmtN(s.impressions)} on LinkedIn</span>` : ""}${fit === "personal" ? '<span class="wk-tag">Personal</span>' : ""}${p && state.childOf.has(p.id) ? '<span class="wk-tag">Thread</span>' : ""}</div>
+      </div>`;
+    };
+    return `<div class="wk-col${isToday ? " today" : ""}${past ? " past" : ""}" data-day="${d.getTime()}">
+      <div class="wk-h"><b>${d.toLocaleDateString(undefined, { weekday: "short" })}</b><span>${d.getDate()}</span>${best != null ? `<em title="Best hour on ${I.DAYS[d.getDay()]}s">best ${I.hourLabel(best)}</em>` : ""}</div>
+      ${strip ? `<div class="wk-strip" title="How each hour does on ${I.DAYS[d.getDay()]}s">${strip}</div>` : ""}
+      <div class="wk-list">${mine.map(card).join("") || `<div class="wk-none">${past ? "Nothing went out" : "Nothing planned"}</div>`}</div>
+    </div>`;
+  };
+  $("wkv").innerHTML = head + `<div class="wk-grid">${days.map(col).join("")}</div>`;
+  XLIIcons.paint($("wkv"));
+  const root = $("wkv");
+  root.querySelectorAll(".wk-card[data-qid]").forEach(ch => ch.addEventListener("dragstart", ev => { ev.dataTransfer.setData("text/xli-qid", ch.dataset.qid); ev.dataTransfer.effectAllowed = "move"; }));
+  root.querySelectorAll(".wk-card.open, .wk-card[data-qid]").forEach(ch => dropTarget(ch, () => ({ at: +ch.dataset.at, qid: ch.dataset.qid })));
+  root.querySelectorAll(".wk-col").forEach(day => dropTarget(day, () => {
+    const q = dragQid && state.queue.find(x => x.qid === dragQid); if (!q) return null;
+    const dd = new Date(+day.dataset.day), best = a.count ? I.bestHourOn(a, dd.getDay()) : null;
+    // dropped on a day: that day's best hour when we know it, else the same time of day
+    const t = new Date(q.at); dd.setHours(best != null ? best : t.getHours(), best != null ? naturalMinute(q.qid) : t.getMinutes(), 0, 0); return { at: dd.getTime() };
+  }));
+  root.querySelectorAll("[data-fill]").forEach(b => b.onclick = e => { e.stopPropagation(); acceptSuggestion(+b.dataset.at, b.dataset.fill); });
+  root.querySelectorAll("[data-pick]").forEach(b => b.onclick = e => { e.stopPropagation(); state.fillAt = +b.dataset.pick; state.status = "open"; go("library"); });
+  root.querySelectorAll(".wk-card:not(.open)").forEach(c => c.onclick = () => { const id = c.dataset.id; if (c.dataset.k === "posted") { const s = state.liStatus[id]; if (s?.url) return window.open(s.url, "_blank"); } if (id && state.byId.get(id)) openComposer(id); });
+}
 $("calPrev").onclick = () => {
+  if (cal.mode === "week") { cal.week--; return renderCalendar(); }
   cal.m--;
   if (cal.m < 0) (cal.m = 11), cal.y--;
   renderCalendar();
 };
 $("calNext").onclick = () => {
+  if (cal.mode === "week") { cal.week++; return renderCalendar(); }
   cal.m++;
   if (cal.m > 11) (cal.m = 0), cal.y++;
   renderCalendar();
 };
+document.querySelectorAll("#calMode button").forEach(b => b.onclick = () => { cal.mode = b.dataset.m; try { localStorage.setItem("calMode", cal.mode); } catch {} renderCalendar(); });
 $("calToday").onclick = () => {
+  cal.week = 0;
   cal.y = new Date().getFullYear();
   cal.m = new Date().getMonth();
   renderCalendar();
