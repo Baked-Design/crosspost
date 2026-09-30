@@ -213,7 +213,18 @@
           .body > a, a { color:var(--accent); font-weight:600; text-decoration:none; }
           .spin { opacity:.75; }
           .done { display:flex; align-items:center; gap:10px; padding:2px 0 4px; font-weight:500; }
-          .done .ok { width:22px; height:22px; border-radius:50%; background:color-mix(in srgb, var(--text) 8%, transparent); color:var(--text); display:grid; place-items:center; font-weight:800; font-size:12px; flex:none; }
+          .done .ok { width:22px; height:22px; border-radius:50%; background:color-mix(in srgb, #22a35a 16%, transparent); color:#22a35a; display:grid; place-items:center; flex:none; animation: pop .45s cubic-bezier(.34,1.56,.64,1) both; }
+          .done .ok svg { width:13px; height:13px; }
+          .done .ok path { fill:none; stroke:currentColor; stroke-width:2.6; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:20; stroke-dashoffset:20; animation: draw .35s cubic-bezier(.2,.8,.2,1) .1s forwards; }
+          .done > span:nth-child(2), .done a { animation: rise .45s cubic-bezier(.2,.8,.2,1) .08s both; }
+          .sp { display:inline-block; width:12px; height:12px; border-radius:50%; border:2px solid color-mix(in srgb, currentColor 25%, transparent); border-top-color:currentColor; animation: rot .7s linear infinite; vertical-align:-2px; margin-right:6px; }
+          .card.shake { animation: shake .45s cubic-bezier(.36,.07,.19,.97) both; }
+          @keyframes pop { from { transform:scale(.4); } to { transform:scale(1); } }
+          @keyframes draw { to { stroke-dashoffset:0; } }
+          @keyframes rise { from { opacity:0; transform:translateY(6px); filter:blur(4px); } to { opacity:1; transform:none; filter:none; } }
+          @keyframes rot { to { transform:rotate(360deg); } }
+          @keyframes shake { 10%,90% { transform:translateX(-1px); } 20%,80% { transform:translateX(3px); } 30%,50%,70% { transform:translateX(-6px); } 40%,60% { transform:translateX(6px); } }
+          @media (prefers-reduced-motion: reduce) { .done .ok, .done .ok path, .done > span, .done a, .card.shake, .sp { animation:none !important; stroke-dashoffset:0; } }
         </style>
         <div class="card">
           <div class="bar" part="bar" style="transform:scaleX(0)"></div>
@@ -354,12 +365,12 @@
         postBtn.disabled = true;
         skipBtn.disabled = true;
         ta.disabled = true;
-        status.textContent = "Posting…";
+        status.innerHTML = '<span class="sp"></span>Posting…';
         err.hidden = true;
         try {
           const r = await send({ type: "publish", text: ta.value.trim(), ...visualPayload(), xText: getXText ? getXText() : xText, tweetId });
           status.textContent = "";
-          $(".body").innerHTML = `<div class="done"><span class="ok">✓</span><span style="flex:1">Posted to LinkedIn${r.imageCount ? ` with ${r.visual === "card" ? "tweet card" : r.imageCount + " image" + (r.imageCount > 1 ? "s" : "")}` : ""}</span><a href="${r.url}" target="_blank" rel="noopener">View post</a></div>`;
+          $(".body").innerHTML = `<div class="done"><span class="ok"><svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></svg></span><span style="flex:1">Posted to LinkedIn${r.imageCount ? ` with ${r.visual === "card" ? "tweet card" : r.imageCount + " image" + (r.imageCount > 1 ? "s" : "")}` : ""}</span><a href="${r.url}" target="_blank" rel="noopener">View post</a></div>`;
           $(".row").remove();
           close(6000);
         } catch (e) {
@@ -370,6 +381,7 @@
           postBtn.textContent = "Retry";
           status.textContent = "Failed";
           showError(e.message);
+          const card = $(".card"); card.classList.remove("shake"); void card.offsetWidth; card.classList.add("shake");
         }
       };
 
@@ -407,7 +419,7 @@
           done = true;
           const when = new Date(r.added[0].at).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
           status.textContent = "";
-          $(".body").innerHTML = `<div class="done"><span class="ok">✓</span><span></span></div>`;
+          $(".body").innerHTML = `<div class="done"><span class="ok"><svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></svg></span><span></span></div>`;
           $(".body .done span:last-child").textContent = `Queued for ${when}`;
           $(".row").remove();
           close(4000);

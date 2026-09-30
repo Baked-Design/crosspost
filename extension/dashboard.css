@@ -406,3 +406,21 @@ body.dragging .slot-open, body.dragging .chip.open, body.dragging .cal-day:not(.
 @media (max-width: 760px) { .wk-grid { grid-template-columns: 1fr 1fr; } .wk-stats { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 480px) { .wk-grid { grid-template-columns: 1fr; } .wk-col { min-height: 0; } }
 .wk-other { margin-left: auto; flex: none; width: 22px; }
+
+/* small moments */
+@keyframes mo-rise { from { opacity: 0; transform: translateY(8px); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes mo-land { 0% { transform: scale(.9); box-shadow: 0 0 0 2px #ff6a33; } 60% { transform: scale(1.03); } 100% { transform: scale(1); } }
+@keyframes mo-word { to { opacity: 1; filter: none; } }
+.mo-rise { animation: mo-rise .5s cubic-bezier(.2,.8,.2,1) both; animation-delay: calc(var(--i) * 35ms); }
+.wk-card.mo-land { animation: mo-land .6s cubic-bezier(.34,1.56,.64,1) both; }
+.wk-card { transition: border-color .12s, transform .35s cubic-bezier(.34,1.56,.64,1), box-shadow .25s; }
+.wk-card:not(.open):hover { transform: translateY(-2px); box-shadow: 0 8px 20px -10px rgba(22,20,15,.35); }
+.wk-list { transition: gap .35s cubic-bezier(.34,1.56,.64,1); }
+.wk-col:hover .wk-list { gap: 11px; }
+.mo-word { opacity: 0; filter: blur(5px); animation: mo-word .5s ease forwards; animation-delay: var(--d); }
+.mo-seg { position: relative; }
+.mo-seg button { position: relative; z-index: 1; }
+.mo-seg button.on { background: transparent !important; box-shadow: none !important; }
+.mo-seg .mo-pill { position: absolute; top: 3px; bottom: 3px; left: 0; border-radius: 7px; background: var(--surface); box-shadow: 0 1px 2px rgba(22,20,15,.06), 0 0 0 1px var(--line); pointer-events: none; }
+.mo-seg .mo-pill.go { transition: transform .45s cubic-bezier(.34,1.56,.64,1), width .45s cubic-bezier(.34,1.56,.64,1); }
+@media (prefers-reduced-motion: reduce) { .mo-rise, .wk-card.mo-land, .mo-word { animation: none !important; opacity: 1; filter: none; } .wk-card, .wk-list, .mo-seg .mo-pill.go { transition: none; } .wk-card:not(.open):hover { transform: none; } }

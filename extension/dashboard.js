@@ -141,8 +141,25 @@ function heatColor(score) {
   const x = Math.max(-1, Math.min(1, Math.log2(score) / 1.6));
   return x >= 0 ? `color-mix(in oklab, #ff5a1f ${Math.round(18 + x * 82)}%, var(--surface))` : `color-mix(in oklab, #7d8aa6 ${Math.round(12 + -x * 40)}%, var(--surface))`;
 }
+// small moments: things rise in when you open a view, the switch slides, a moved post lands with a spring
+const REDUCE = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let wkShown = "", insShown = "";
+function rise(els, max = 16) { if (REDUCE) return; [...els].slice(0, max).forEach((el, i) => { el.style.setProperty("--i", i); el.classList.remove("mo-rise"); void el.offsetWidth; el.classList.add("mo-rise"); }); }
+function motionWeek(root) {
+  const key = (cal.mode || "") + ":" + (cal.week || 0);
+  if (key !== wkShown) { wkShown = key; rise(root.querySelectorAll(".wk-card"), 30); }
+  if (state.landed) { const el = root.querySelector(`.wk-card[data-qid="${CSS.escape(state.landed)}"]`); state.landed = null; if (el && !REDUCE) { el.classList.remove("mo-land"); void el.offsetWidth; el.classList.add("mo-land"); } }
+}
+function slidePill(seg) {
+  if (!seg) return; const on = seg.querySelector("button.on"); if (!on) return;
+  let pill = seg.querySelector(".mo-pill"); const fresh = !pill;
+  if (fresh) { pill = document.createElement("span"); pill.className = "mo-pill"; seg.prepend(pill); seg.classList.add("mo-seg"); }
+  pill.style.width = on.offsetWidth + "px"; pill.style.transform = `translateX(${on.offsetLeft}px)`;
+  if (fresh) requestAnimationFrame(() => pill.classList.add("go"));
+}
 function renderInsights() {
   document.querySelectorAll("#insSeg button").forEach(b => b.classList.toggle("on", b.dataset.p === state.insPlat));
+  slidePill($("insSeg"));
   const plat = state.insPlat, posts = insPosts(plat), a = XLIInsights.analyze(posts), I = XLIInsights, box = $("ins");
   if (!a.count) {
     box.innerHTML = plat === "li"
@@ -186,9 +203,11 @@ function renderInsights() {
       <div class="ins-h"><h2>What to post next</h2><span>From your own numbers</span></div>
       <ul class="ins-sug">${sug.map(x => `<li><i data-i="${x.kind === "time" ? "clock" : x.kind === "topic" ? "text" : x.kind === "repost" ? "send" : x.kind === "reach" ? "eye" : "sparkles"}"></i><span>${esc(x.text)}</span>${x.ids ? `<button class="btn sm" data-queue-ids="${esc(x.ids.join(","))}">Queue</button>` : ""}</li>`).join("")}</ul>
       <div class="row"><button class="btn" id="insIdeas"><i data-i="sparkles"></i>${state.ideas ? "5 more ideas" : "Get 5 post ideas from Claude"}</button>${plat === "li" ? `<button class="btn ghost" id="liRead"><i data-i="download"></i>Refresh LinkedIn stats</button>` : ""}</div>
-      ${state.ideas ? `<div class="ideas">${state.ideas.map((x, i) => `<div class="idea"><div class="idea-w">${esc(x.idea)}${x.when ? ` <em>${esc(x.when)}</em>` : ""}</div><p>${esc(x.draft)}</p><div class="row"><button class="btn sm" data-copy="${i}">Copy</button><a class="btn sm ghost" target="_blank" rel="noopener" href="https://x.com/intent/post?text=${encodeURIComponent(x.draft)}">Post on X</a></div></div>`).join("")}</div>` : ""}
+      ${state.ideas ? `<div class="ideas">${state.ideas.map((x, i) => `<div class="idea"><div class="idea-w">${esc(x.idea)}${x.when ? ` <em>${esc(x.when)}</em>` : ""}</div><p>${state.ideasFresh && !REDUCE ? String(x.draft).split(/(\s+)/).map((w, k) => /^\s+$/.test(w) ? w : `<span class="mo-word" style="--d:${i * 180 + k * 22}ms">${esc(w)}</span>`).join("") : esc(x.draft)}</p><div class="row"><button class="btn sm" data-copy="${i}">Copy</button><a class="btn sm ghost" target="_blank" rel="noopener" href="https://x.com/intent/post?text=${encodeURIComponent(x.draft)}">Post on X</a></div></div>`).join("")}</div>` : ""}
     </section>`;
   XLIIcons.paint(box); bindIns(a, posts);
+  state.ideasFresh = false;
+  const ik = plat + ":" + a.count; if (ik !== insShown) { insShown = ik; rise(box.querySelectorAll(".ins-kpis > div")); }
 }
 function bindIns(a, posts) {
   const box = $("ins");
@@ -206,7 +225,7 @@ function bindIns(a, posts) {
       `Best times: ${a.slots.map(x => I.DAYS[x.d] + " " + I.hourLabel(x.h) + " (" + I.times(x.score) + ")").join(", ") || "not enough data"}.\n` +
       `What works: ${a.features.slice(0, 5).map(f => f.label + " " + I.times(f.lift)).join("; ")}.\nTopics that land: ${a.topics.map(t => t.t).join(", ")}.\n` +
       `Notes: ${sug.map(x => x.text).join(" ")}\n\nBest posts:\n${a.top.map(p => "- (" + I.times(p.rel) + ") " + p.text.slice(0, 500)).join("\n")}\n\nPosts that didn't land:\n${a.flops.map(p => "- " + p.text.slice(0, 300)).join("\n")}`;
-    try { const r = await send({ type: "postIdeas", summary }); if (!r) throw new Error("Claude didn't answer. Check your Anthropic key in Settings."); state.ideas = r; }
+    try { const r = await send({ type: "postIdeas", summary }); if (!r) throw new Error("Claude didn't answer. Check your Anthropic key in Settings."); state.ideas = r; state.ideasFresh = true; }
     catch (e) { toast(e.message || String(e)); }
     renderInsights();
   };
@@ -1090,6 +1109,7 @@ async function moveQueued(qid, at) {
   const from = q && q.at;
   try {
     await send({ type: "updateQueueItem", qid, patch: { at } });
+    state.landed = qid;
     await load();
     toastUndo(`Moved to ${shortWhen(at)}`, from ? async () => {
       await send({ type: "updateQueueItem", qid, patch: { at: from } });
@@ -1129,6 +1149,7 @@ function dropTarget(el, target) {
     if (t.qid === qid) return;
     if (t.qid) {
       await send({ type: "swapQueueItems", a: qid, b: t.qid });
+      state.landed = qid;
       await load();
       toastUndo("Swapped", async () => {
         await send({ type: "swapQueueItems", a: qid, b: t.qid });
@@ -1253,6 +1274,7 @@ const cal = { y: new Date().getFullYear(), m: new Date().getMonth(), mode: "week
 try { const m = localStorage.getItem("calMode"); if (m === "month" || m === "week") cal.mode = m; } catch {}
 function renderCalendar() {
   document.querySelectorAll("#calMode button").forEach(b => b.classList.toggle("on", b.dataset.m === cal.mode));
+  slidePill($("calMode"));
   $("cal").hidden = cal.mode === "week";
   document.querySelector(".cal-legend").hidden = cal.mode === "week";
   $("wkv").hidden = cal.mode !== "week";
@@ -1445,6 +1467,7 @@ function renderWeek() {
   $("wkv").innerHTML = head + `<div class="wk-grid">${days.map(col).join("")}</div>`;
   XLIIcons.paint($("wkv"));
   const root = $("wkv");
+  motionWeek(root);
   root.querySelectorAll(".wk-card[data-qid]").forEach(ch => ch.addEventListener("dragstart", ev => { ev.dataTransfer.setData("text/xli-qid", ch.dataset.qid); ev.dataTransfer.effectAllowed = "move"; }));
   root.querySelectorAll(".wk-card.open, .wk-card[data-qid]").forEach(ch => dropTarget(ch, () => ({ at: +ch.dataset.at, qid: ch.dataset.qid })));
   root.querySelectorAll(".wk-col").forEach(day => dropTarget(day, () => {
