@@ -1405,31 +1405,40 @@ function renderWeek() {
   let repeat = null; for (let i = 2; i < out.length; i++) { const k = topicKey(out[i].text); if (k && k === topicKey(out[i - 1].text) && k === topicKey(out[i - 2].text)) { repeat = k; break; } }
   const target = state.rhythm?.target || 3;
   const head = `<div class="wk-stats">
-      <div><b>${out.length}<em>/${target}</em></b><span>posts this week</span></div>
+      <div><b>${out.length}<em> / ${target}</em></b><span>posts this week</span></div>
       <div><b>${fmtN(xReach)}</b><span>${a.metricLabel || "views"} they got on X</span></div>
       <div><b>${liReach ? fmtN(liReach) : "–"}</b><span>LinkedIn impressions so far</span></div>
       <div class="wk-mix"><span class="mix">${["work", "personal", "unclear"].map(k => { const n = fits.filter(f => f === k).length; return n ? `<i class="mx ${k}" style="flex:${n}"></i>` : ""; }).join("")}</span><span>${fits.filter(f => f === "work").length} work · ${fits.filter(f => f === "personal").length} personal · ${photos} with photos</span></div>
     </div>${repeat ? `<p class="wk-warn">Three posts in a row about “${esc(repeat)}”. Swap one for something different so LinkedIn doesn't see the same thing three days running.</p>` : ""}`;
+  const slotCls = sc => sc == null ? "" : sc >= 1.5 ? "hot" : sc >= 0.9 ? "ok" : "cold";
+  const slotTip = sc => sc == null ? "" : `${sc >= 1.5 ? "Great" : sc >= 0.9 ? "Good" : "Quiet"} slot: posts at this hour do ${I.times(sc)} your usual on X`;
   const col = d => {
     const k = d.toDateString(), mine = items.filter(x => new Date(x.at).toDateString() === k), isToday = k === new Date().toDateString(), past = d.getTime() + 864e5 < now;
-    const best = a.count ? I.bestHourOn(a, d.getDay()) : null;
-    const strip = a.count ? a.heat[d.getDay()].map((c, h) => `<i style="${c.n ? "background:" + heatColor(c.score) : ""}" title="${I.hourLabel(h)}${c.n ? " · " + I.times(c.score) : ""}"></i>`).join("") : "";
+    // only name a best hour we trust: 2+ posts behind it and clearly above your usual
+    let best = null;
+    if (a.count) { const c = a.heat[d.getDay()].map((c, h) => ({ h, n: c.n, s: c.score })).filter(c => c.n >= 2 && c.s >= 1.2 && c.h >= 6).sort((x, y) => y.s - x.s)[0]; if (c) best = c.h; }
     const card = x => {
       const p = x.kind === "open" ? x.pick : state.byId.get(x.id);
-      const img = (x.images && x.images[0]) || (p && p.images && p.images[0]);
       const time = fmtTime(x.at).replace(" ", "").toLowerCase();
-      if (x.kind === "open") return `<div class="wk-card open" data-k="open" data-at="${x.at}"><div class="wk-top"><span class="wk-time">${time}</span>${scoreTag(slotScore(a, x.at))}</div>${p ? `<div class="wk-txt">${esc((p.text || "").slice(0, 110))}</div><div class="wk-data">${M(p) ? `<span>${fmtN(M(p))} ${a.metricLabel || "views"} on X</span>` : ""}</div><div class="wk-acts"><button class="btn sm" data-fill="${esc(p.id)}" data-at="${x.at}">Schedule this</button><button class="linkbtn" data-pick="${x.at}">Pick another</button></div>` : `<div class="wk-empty">Open slot</div><div class="wk-acts"><button class="linkbtn" data-pick="${x.at}">Pick a post</button></div>`}</div>`;
-      const s = li.get(normT(x.text)), fit = p ? fitOf(p).label : "", xs = p ? M(p) : 0;
-      return `<div class="wk-card ${x.kind}" data-k="${x.kind}" data-id="${esc(x.id || "")}" data-at="${x.at}"${x.qid ? ` data-qid="${esc(x.qid)}" draggable="true"` : ""}>
+      const sc = x.kind === "posted" ? null : slotScore(a, x.at);
+      if (x.kind === "open") return `<div class="wk-card open ${slotCls(sc)}" data-k="open" data-at="${x.at}">
+          <div class="wk-meta"><span class="wk-time">${time}</span>${sc != null ? `<span class="wk-sc" title="${esc(slotTip(sc))}">${I.times(sc)}</span>` : ""}<span class="wk-st">Open</span></div>
+          ${p ? `<div class="wk-sug" title="${esc(p.text || "")}">${esc((p.text || "").replace(/\s+/g, " ").slice(0, 80))}</div>
+          <div class="wk-acts"><button class="wk-add" data-fill="${esc(p.id)}" data-at="${x.at}">Add this</button>${M(p) ? `<span class="wk-sv">𝕏 ${fmtN(M(p))}</span>` : ""}<button class="wk-other" data-pick="${x.at}" title="Pick another post">•••</button></div>`
+            : `<div class="wk-acts"><button class="wk-add" data-pick="${x.at}">Pick a post</button></div>`}
+        </div>`;
+      const img = (x.images && x.images[0]) || (p && p.images && p.images[0]);
+      const s = li.get(normT(x.text)), xs = p ? M(p) : 0;
+      const nums = [xs ? `<span title="On X">𝕏 ${fmtN(xs)}</span>` : "", s ? `<span title="LinkedIn: ${s.likes} reactions, ${s.impressions} impressions">in ${fmtN(s.impressions)}</span>` : ""].filter(Boolean).join("");
+      return `<div class="wk-card ${x.kind} ${slotCls(sc)}" data-k="${x.kind}" data-id="${esc(x.id || "")}" data-at="${x.at}"${x.qid ? ` data-qid="${esc(x.qid)}" draggable="true"` : ""} title="${esc((x.text || "").slice(0, 280))}">
         ${img ? `<div class="wk-img" style="background-image:url('${esc(img)}')"></div>` : ""}
-        <div class="wk-top"><span class="wk-time">${time}</span>${x.kind === "posted" ? '<span class="wk-pill ok">Posted</span>' : x.kind === "failed" ? '<span class="wk-pill bad">Failed</span>' : scoreTag(slotScore(a, x.at))}</div>
-        <div class="wk-txt">${esc((x.text || "").replace(/\s+/g, " ").slice(0, 140))}</div>
-        <div class="wk-data">${xs ? `<span title="How it did on X">${icon("eye")}${fmtN(xs)} on X</span>` : ""}${s ? `<span title="LinkedIn">${icon("like")}${s.likes} · ${fmtN(s.impressions)} on LinkedIn</span>` : ""}${fit === "personal" ? '<span class="wk-tag">Personal</span>' : ""}${p && state.childOf.has(p.id) ? '<span class="wk-tag">Thread</span>' : ""}</div>
+        <div class="wk-meta"><span class="wk-time">${time}</span>${x.kind === "posted" ? `<span class="wk-ok" title="Posted to LinkedIn">${icon("check")}</span>` : x.kind === "failed" ? '<span class="wk-bad">Failed</span>' : sc != null ? `<span class="wk-sc" title="${esc(slotTip(sc))}">${I.times(sc)}</span>` : ""}</div>
+        <div class="wk-txt">${esc((x.text || "").replace(/\s+/g, " ").slice(0, 120))}</div>
+        ${nums ? `<div class="wk-nums">${nums}</div>` : ""}
       </div>`;
     };
     return `<div class="wk-col${isToday ? " today" : ""}${past ? " past" : ""}" data-day="${d.getTime()}">
-      <div class="wk-h"><b>${d.toLocaleDateString(undefined, { weekday: "short" })}</b><span>${d.getDate()}</span>${best != null ? `<em title="Best hour on ${I.DAYS[d.getDay()]}s">best ${I.hourLabel(best)}</em>` : ""}</div>
-      ${strip ? `<div class="wk-strip" title="How each hour does on ${I.DAYS[d.getDay()]}s">${strip}</div>` : ""}
+      <div class="wk-h"><span class="wk-dn">${d.toLocaleDateString(undefined, { weekday: "short" })}</span><span class="wk-dd">${d.getDate()}</span>${best != null ? `<em title="Your best hour on ${I.DAYS[d.getDay()]}s">${I.hourLabel(best)}</em>` : ""}</div>
       <div class="wk-list">${mine.map(card).join("") || `<div class="wk-none">${past ? "Nothing went out" : "Nothing planned"}</div>`}</div>
     </div>`;
   };
