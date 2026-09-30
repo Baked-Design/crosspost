@@ -723,7 +723,11 @@ const handlers = {
     return { ok: true };
   },
   async startLiImport() {
-    await chrome.tabs.create({ url: "https://www.linkedin.com/in/me/recent-activity/all/#xli-li-import", active: true });
+    // your own activity page: /in/me/ takes LinkedIn to your profile, and li-stats.js learns your address from there
+    const { liSlug = "" } = await chrome.storage.local.get("liSlug");
+    await chrome.storage.local.set({ liImportAt: Date.now() });
+    const slug = /^[\w%.-]{2,100}$/.test(liSlug) ? liSlug : "";
+    await chrome.tabs.create({ url: slug ? `https://www.linkedin.com/in/${slug}/recent-activity/all/` : "https://www.linkedin.com/in/me/", active: true });
     return { ok: true };
   },
   // five post ideas from Claude, built on what already worked for you
