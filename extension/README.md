@@ -73,6 +73,17 @@ Press **5** (or the flame in the dock). For X and LinkedIn:
 
 LinkedIn numbers come from your own activity page: tap **Read my LinkedIn stats** and Crosspost scrolls it and reads reactions, comments, reposts and impressions. Everything stays in your browser.
 
+## Week board (v1.12)
+
+Calendar opens on **Week**: one column per day, each post as a card with its photo, how it did on X, and (once posted) its LinkedIn reactions and impressions.
+
+- Every scheduled post and open slot says how good its hour is from your heat map (Great / Good / Quiet slot, with the multiple).
+- Each day shows its best hour and a thin heat strip of the whole day.
+- Open slots come with the post that fits best (one you haven't reviewed, or one you skipped that did well on X): *Schedule this* or *Pick another*.
+- The week at a glance: posts vs your goal, the views those posts got on X, LinkedIn impressions so far, and your work / personal / photo mix.
+- A heads-up when three posts in a row are about the same thing.
+- Drag a post onto a day and it lands on that day's best hour. Month view is still one tap away.
+
 ## Better times (v1.11)
 
 - **Calendar → Better times**: three one-tap fixes for what's already scheduled, each with undo:
