@@ -320,3 +320,24 @@ body.dragging .slot-open, body.dragging .chip.open, body.dragging .cal-day:not(.
 .idea-w { font-size: 12.5px; color: var(--muted); }
 .idea-w em { font-style: normal; color: var(--text); font-weight: 500; }
 .idea p { margin: 0; font-size: 13.5px; white-space: pre-wrap; }
+
+/* all caught up: still useful */
+.cu { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 28px; text-align: left; width: min(760px, 100%); }
+@media (max-width: 760px) { .cu { grid-template-columns: 1fr; } }
+.cu-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.cu-h { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.cu-row { display: flex; gap: 10px; align-items: baseline; width: 100%; font-size: 13px; }
+.cu-t { color: var(--muted); white-space: nowrap; font-size: 12px; font-variant-numeric: tabular-nums; }
+.cu-x { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cu-note { margin: 0; font-size: 13px; color: var(--muted); }
+.cu .row { gap: 6px; }
+
+/* calendar: better times */
+.rt-pop { position: absolute; right: 0; top: calc(100% + 8px); z-index: 30; width: 340px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); padding: 8px; }
+.rt-opt { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; border: 0; background: none; border-radius: 10px; padding: 10px 12px; cursor: pointer; font: inherit; color: inherit; }
+.rt-opt:hover:not(:disabled) { background: var(--hover); }
+.rt-opt:disabled { opacity: .45; cursor: default; }
+.rt-opt b { font-size: 13.5px; font-weight: 600; }
+.rt-opt span { font-size: 12.5px; color: var(--muted); }
+.rt-opt em { font-style: normal; color: #e0521b; font-weight: 600; }
+.sched-best { margin: 6px 0 0; font-size: 12px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

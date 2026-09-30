@@ -767,9 +767,15 @@ const handlers = {
       xProfile
     };
   },
-  async startImport() {
+  async startImport({ older } = {}) {
     const { myHandle } = await getSettings();
-    const url = myHandle ? `https://x.com/${myHandle}#xli-import` : "https://x.com/home";
+    let url = myHandle ? `https://x.com/${myHandle}#xli-import` : "https://x.com/home";
+    // older posts: X search goes straight to posts before the oldest one we have, so nothing is read twice
+    if (older && myHandle && /^\w{1,15}$/.test(myHandle)) {
+      const { xposts = {} } = await chrome.storage.local.get("xposts");
+      const oldest = Math.min(...Object.values(xposts).filter(p => p.author === myHandle.toLowerCase() && p.createdAt).map(p => p.createdAt));
+      if (Number.isFinite(oldest)) url = `https://x.com/search?q=${encodeURIComponent(`from:${myHandle} until:${new Date(oldest + 864e5).toISOString().slice(0, 10)}`)}&f=live#xli-import`;
+    }
     chrome.tabs.create({ url });
     return { needsHandle: !myHandle };
   },
@@ -883,6 +889,21 @@ const handlers = {
       if (patch.at) Object.assign(q, { status: "scheduled", error: undefined });
       await chrome.storage.local.set({ queue: queue.sort((a, b) => a.at - b.at) });
       return q;
+    });
+  },
+  // re-time several queued posts at once (natural minutes, best hours); returns the old times for undo
+  async bulkRetime({ changes }) {
+    return withLock(async () => {
+      const { queue } = await getStore();
+      const before = [];
+      for (const c of (changes || []).slice(0, 500)) {
+        const q = queue.find(x => x.qid === c.qid);
+        if (!q || q.status === "posting" || !(c.at > Date.now() + 60_000) || !(c.at < Date.now() + 800 * 864e5)) continue;
+        before.push({ qid: q.qid, at: q.at });
+        Object.assign(q, { at: Math.round(c.at), status: "scheduled", error: undefined });
+      }
+      await chrome.storage.local.set({ queue: queue.sort((a, b) => a.at - b.at) });
+      return { changed: before.length, before };
     });
   },
   async removeQueueItem({ qid }) {

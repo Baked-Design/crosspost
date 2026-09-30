@@ -213,6 +213,69 @@ function bindIns(a, posts) {
 }
 document.querySelectorAll("#insSeg button").forEach(b => b.addEventListener("click", () => { state.insPlat = b.dataset.p; state.insCell = null; state.ideas = null; renderInsights(); }));
 
+// ---------- calendar: better times for what's already scheduled ----------
+let xCache = null;
+function xAnalysis() {
+  const key = state.posts.length + ":" + state.posts.reduce((t, p) => t + (p.views || 0), 0);
+  if (!xCache || xCache.key !== key) xCache = { key, a: XLIInsights.analyze(insPosts("x")) };
+  return xCache.a;
+}
+// 9:00 -> 9:17: a steady minute per post, never a round number
+function naturalMinute(seed) { let h = 2166136261; for (const c of String(seed)) h = Math.imul(h ^ c.charCodeAt(0), 16777619); h = Math.imul(h ^ (h >>> 15), 2246822507); let m = 3 + ((h >>> 0) % 54); if (m % 5 === 0) m += 2; return m; }
+function atHour(ts, hour, seed) { const d = new Date(ts); d.setHours(hour, naturalMinute(seed), 0, 0); return d.getTime(); }
+function retimePlans() {
+  const now = Date.now() + 5 * 60e3, a = xAnalysis();
+  const future = state.queue.filter(q => q.status !== "posting" && q.status !== "posted" && q.at > now).sort((x, y) => x.at - y.at);
+  // 1. same day and hour, natural minute
+  const natural = future.filter(q => new Date(q.at).getMinutes() % 5 === 0).map(q => ({ qid: q.qid, at: atHour(q.at, new Date(q.at).getHours(), q.qid) })).filter(c => c.at > now);
+  // 2. same day, that day's best hour (spread out so two posts don't land together)
+  const perDay = [];
+  if (a.count) {
+    const used = [];
+    for (const q of future) {
+      const d = new Date(q.at), best = XLIInsights.bestHourOn(a, d.getDay());
+      if (best == null) continue;
+      let at = null;
+      for (const off of [0, 1, -1, 2, -2, 3, 11, 12]) {
+        const h = best + off; if (h < 6 || h > 23) continue;
+        const t = atHour(q.at, h, q.qid);
+        if (t > now && !used.some(u => Math.abs(u - t) < 50 * 60e3)) { at = t; break; }
+      }
+      if (at == null) continue;
+      used.push(at);
+      if (Math.abs(at - q.at) > 5 * 60e3) perDay.push({ qid: q.qid, at });
+    }
+  }
+  // 3. everything, in the same order, into your best windows only
+  const bw = XLIInsights.bestWindows(a, Math.max(1, Math.min(4, (XLISlots.parse(state.settings.slotTimes) || [1]).length)));
+  let slots = [];
+  if (bw && future.length) { try { slots = XLISlots.upcoming({ ...state.settings, slotTimes: bw.text, slotNatural: true }, [], future.length).map(x => x.at); } catch {} }
+  const best = slots.length === future.length ? future.map((q, i) => ({ qid: q.qid, at: slots[i] })).filter(c => Math.abs(c.at - future.find(q => q.qid === c.qid).at) > 5 * 60e3) : [];
+  return { natural, perDay, best, bw, a, total: future.length };
+}
+function renderRetime() {
+  const p = retimePlans(), pop = $("rtPop"), I = XLIInsights;
+  const opt = (k, title, sub, n) => `<button class="rt-opt" data-rt="${k}" ${n ? "" : "disabled"}><b>${title}</b><span>${sub}</span><span><em>${n ? n + " post" + (n === 1 ? "" : "s") + " move" : "Nothing to change"}</em></span></button>`;
+  const noData = !p.a.count || !p.a.slots.length;
+  pop.innerHTML =
+    opt("natural", "Natural minutes", "Posts sitting on the hour (9:00) move to times like 9:17. Same day, same hour.", p.natural.length) +
+    opt("perDay", "Each day's best hour", noData ? "Needs a few posts with views on X to know your best hours." : "Every post stays on its day and moves to the hour that does best on that day, from your heat map.", noData ? 0 : p.perDay.length) +
+    opt("best", "Only my best windows", p.bw ? `Re-plans the whole queue, same order, into ${esc(p.bw.windows.map(w => I.hourLabel(w.h) + "–" + I.hourLabel((w.h + 2) % 24)).join(" and "))} on your posting days.` : "Needs a few posts with views on X to know your best hours.", p.bw ? p.best.length : 0);
+  pop.querySelectorAll("[data-rt]").forEach(b => b.onclick = async ev => {
+    ev.stopPropagation();
+    const changes = p[b.dataset.rt];
+    pop.hidden = true;
+    try {
+      const r = await send({ type: "bulkRetime", changes });
+      await load();
+      toastUndo(`Moved ${r.changed} post${r.changed === 1 ? "" : "s"}`, async () => { await send({ type: "bulkRetime", changes: r.before }); await load(); });
+    } catch (e) { toast(e.message); }
+  });
+}
+$("rtBtn").onclick = ev => { ev.stopPropagation(); const pop = $("rtPop"); pop.hidden = !pop.hidden; if (!pop.hidden) renderRetime(); };
+$("rtPop").onclick = ev => ev.stopPropagation();
+document.addEventListener("click", () => { if ($("rtPop")) $("rtPop").hidden = true; });
+
 // ---------- shell ----------
 const VIEWS = ["review", "queue", "calendar", "published", "insights", "library"];
 function go(view) {
@@ -341,14 +404,14 @@ function renderReview(anim) {
   if (!p) {
     $("rvEmptyTitle").textContent = hasPosts ? "You're all caught up" : "Bring in your X posts";
     $("rvEmptyText").textContent = hasPosts
-      ? state.skipped.size
-        ? `Everything's queued or posted. You skipped ${state.skipped.size}. Press ⌘K to bring them back.`
-        : "Everything's queued or posted. New posts from X show up here as you browse."
+      ? "Everything's queued or posted. New posts from X show up here as you browse."
       : "Crosspost reads your profile once and saves your posts here. Then you review them one at a time.";
     $("importX").hidden = hasPosts;
     $("importArchiveBtn").hidden = hasPosts;
+    renderCaughtUp(hasPosts);
     return;
   }
+  $("rvMore").innerHTML = "";
   const thread = threadOf(p);
   $("rvCount").textContent = `${state.rIdx + 1} of ${fmtNum(list.length)}`;
   $("rvMeta").innerHTML = [
@@ -775,12 +838,40 @@ $("fillCancel").onclick = () => {
   go("queue");
 };
 
+// all caught up: what's coming, what you skipped that did well, how far back your posts go
+function renderCaughtUp(hasPosts) {
+  const box = $("rvMore");
+  if (!hasPosts) { box.innerHTML = ""; return; }
+  const mine = state.posts.filter(p => p.kind === "post" || p.kind === "quote" || p.kind === "thread");
+  const oldest = mine.reduce((m, p) => (p.createdAt && p.createdAt < m ? p.createdAt : m), Date.now());
+  const since = new Date(oldest).toLocaleDateString(undefined, { month: "short", year: "numeric" });
+  const next = state.queue.filter(q => q.status !== "posted").slice(0, 3);
+  const a = XLIInsights.analyze(insPosts("x"));
+  const relOf = new Map(); if (a.count) { const M = a.metric === "views" ? p => p.views || 0 : p => (p.likes || 0) + 2 * (p.reposts || 0) + 2 * (p.replies || 0); for (const p of mine) relOf.set(p.id, M(p) / a.baseline); }
+  const good = [...state.skipped].map(id => state.byId.get(id)).filter(p => p && (relOf.get(p.id) || 0) >= 1.5).sort((x, y) => relOf.get(y.id) - relOf.get(x.id)).slice(0, 3);
+  const best = a.slots && a.slots[0];
+  box.innerHTML = `
+    <div class="cu">
+      <div class="cu-card"><div class="cu-h">Up next</div>${next.length ? next.map(q => `<div class="cu-row"><span class="cu-t">${esc(shortWhen(q.at))}</span><span class="cu-x">${esc((q.text || "").slice(0, 70))}</span></div>`).join("") : '<p class="cu-note">Nothing queued.</p>'}<button class="linkbtn" id="cuQueue">Open the queue</button></div>
+      <div class="cu-card"><div class="cu-h">Skipped, but did well on X</div>${good.length ? good.map(p => `<div class="cu-row"><span class="cu-t up">${XLIInsights.times(relOf.get(p.id))}</span><span class="cu-x">${esc((p.text || "").slice(0, 70))}</span><button class="btn sm" data-unskip="${esc(p.id)}">Bring back</button></div>`).join("") : `<p class="cu-note">${state.skipped.size ? `Nothing you skipped beat your usual on X. ${state.skipped.size} skipped in total.` : "You haven't skipped anything."}</p>`}${state.skipped.size ? `<button class="linkbtn" id="cuUnskipAll">Bring back all ${state.skipped.size}</button>` : ""}</div>
+      <div class="cu-card"><div class="cu-h">Your X posts</div><p class="cu-note">${mine.length.toLocaleString()} posts, back to ${esc(since)}. Older ones aren't here yet.</p><div class="row"><button class="btn sm" id="cuOlder"><i data-i="download"></i>Import older posts</button><button class="btn sm ghost" id="cuArchive">Import archive</button></div></div>
+      <div class="cu-card"><div class="cu-h">What to post next</div><p class="cu-note">${best ? `Your best time is ${XLIInsights.DAYS[best.d]} ${XLIInsights.hourLabel(best.h)} (${XLIInsights.times(best.score)} your usual).` : "Insights shows what's working once you have a few posts with views."}</p><button class="btn sm" id="cuIdeas"><i data-i="sparkles"></i>See insights and ideas</button></div>
+    </div>`;
+  XLIIcons.paint(box);
+  $("cuQueue").onclick = () => go("queue");
+  $("cuOlder").onclick = () => startImport(true);
+  $("cuArchive").onclick = () => $("archiveFile").click();
+  $("cuIdeas").onclick = () => go("insights");
+  if ($("cuUnskipAll")) $("cuUnskipAll").onclick = async () => { state.skipped.clear(); await chrome.storage.local.set({ skipped: [] }); renderReview(); };
+  box.querySelectorAll("[data-unskip]").forEach(b => b.onclick = async () => { state.skipped.delete(b.dataset.unskip); await chrome.storage.local.set({ skipped: [...state.skipped] }); renderReview(); });
+}
+
 // import
-async function startImport() {
-  const r = await send({ type: "startImport" });
+async function startImport(older) {
+  const r = await send({ type: "startImport", older: older === true });
   if (r.needsHandle) toast("Open x.com once so we can find your profile, then import again");
 }
-$("importX").onclick = startImport;
+$("importX").onclick = () => startImport();
 $("importArchiveBtn").onclick = () => $("archiveFile").click();
 $("archiveFile").onchange = async e => {
   const f = e.target.files[0];
@@ -1078,6 +1169,13 @@ function renderSchedule() {
   if (document.activeElement !== $("slotTimes")) $("slotTimes").value = s.slotTimes || XLISlots.DEFAULT_TIMES;
   $("perDay").querySelectorAll("button").forEach(b => b.classList.toggle("on", +b.dataset.n === wins.length));
   $("slotNatural").checked = s.slotNatural !== false;
+  const bw = XLIInsights.bestWindows(xAnalysis(), Math.max(1, Math.min(4, wins.length || 1)));
+  $("schedBest").hidden = !bw;
+  if (bw) {
+    const same = (s.slotTimes || "").replace(/\s/g, "") === bw.text.replace(/\s/g, "");
+    $("schedBest").innerHTML = `<span>From your heat map: ${esc(bw.windows.map(w => XLIInsights.hourLabel(w.h) + "–" + XLIInsights.hourLabel((w.h + 2) % 24)).join(", "))}</span>${same ? "<em>in use</em>" : '<button class="linkbtn" id="useBest">Use my best times</button>'}`;
+    if ($("useBest")) $("useBest").onclick = () => saveSchedule({ slotTimes: bw.text, slotNatural: true }, "Posting at your best times now");
+  }
   const days = new Set((s.slotDays || []).map(Number));
   $("slotDays").innerHTML = "";
   for (const d of [1, 2, 3, 4, 5, 6, 0]) {
@@ -1108,7 +1206,9 @@ async function saveSchedule(patch, note) {
 }
 $("perDay").addEventListener("click", e => {
   const b = e.target.closest("button");
-  if (b) saveSchedule({ slotTimes: XLISlots.PRESETS[b.dataset.n] }, `${b.dataset.n} a day`);
+  // your best hours when there's enough data, otherwise sensible defaults
+  const bw = b && XLIInsights.bestWindows(xAnalysis(), +b.dataset.n);
+  if (b) saveSchedule({ slotTimes: bw ? bw.text : XLISlots.PRESETS[b.dataset.n] }, `${b.dataset.n} a day${bw ? ", at your best hours" : ""}`);
 });
 $("slotTimes").addEventListener("change", e => saveSchedule({ slotTimes: e.target.value.trim() }, "Posting times saved"));
 $("slotNatural").addEventListener("change", e => saveSchedule({ slotNatural: e.target.checked }));

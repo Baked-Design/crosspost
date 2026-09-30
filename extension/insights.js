@@ -125,5 +125,32 @@
     return s;
   }
 
-  globalThis.XLIInsights = { analyze, suggest, median, DAYS, hourLabel, times, FEATURES };
+  // your n best 2-hour windows across the week (hours that did best, 3+ posts behind each), as a schedule
+  // like "09:00-11:00, 20:00-22:00". null when there isn't enough data to trust.
+  function bestWindows(a, n = 2) {
+    if (!a || !a.hourly) return null;
+    const pad = h => String(h).padStart(2, "0") + ":00";
+    const ranked = [];
+    for (let h = 0; h < 23; h++) {
+      const r = [a.hourly[h], a.hourly[h + 1]].filter(x => x && x.n);
+      const cnt = r.reduce((t, x) => t + x.n, 0);
+      if (cnt < 3 || !a.hourly[h].n) continue;
+      ranked.push({ h, n: cnt, score: r.reduce((t, x) => t + x.score * x.n, 0) / cnt });
+    }
+    ranked.sort((x, y) => y.score - x.score);
+    const picked = [];
+    for (const w of ranked) { if (picked.some(p => Math.abs(p.h - w.h) < 3)) continue; picked.push(w); if (picked.length >= n) break; }
+    if (picked.length < n) return null;
+    return { text: picked.sort((x, y) => x.h - y.h).map(w => `${pad(w.h)}-${w.h + 2 >= 24 ? "23:59" : pad(w.h + 2)}`).join(", "), windows: picked };
+  }
+  // the best hour to post on a given weekday: that day's own numbers when there are enough, else the week's
+  function bestHourOn(a, day) {
+    if (!a || !a.heat || !a.heat.length) return null;
+    const row = a.heat[day].map((c, h) => ({ h, n: c.n, score: c.score })).filter(c => c.n >= 2).sort((x, y) => y.score - x.score)[0];
+    if (row) return row.h;
+    const any = a.hourly.filter(x => x.n >= 3).sort((x, y) => y.score - x.score)[0];
+    return any ? any.h : null;
+  }
+
+  globalThis.XLIInsights = { analyze, suggest, median, DAYS, hourLabel, times, FEATURES, bestWindows, bestHourOn };
 })();

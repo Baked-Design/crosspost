@@ -73,6 +73,15 @@ Press **5** (or the flame in the dock). For X and LinkedIn:
 
 LinkedIn numbers come from your own activity page: tap **Read my LinkedIn stats** and Crosspost scrolls it and reads reactions, comments, reposts and impressions. Everything stays in your browser.
 
+## Better times (v1.11)
+
+- **Calendar → Better times**: three one-tap fixes for what's already scheduled, each with undo:
+  - *Natural minutes*: posts sitting on the hour (9:00) move to 9:17, 9:42… Same day, same hour.
+  - *Each day's best hour*: every post stays on its day and moves to that day's best hour from your heat map.
+  - *Only my best windows*: the whole queue, same order, re-planned into your best 2-hour windows.
+- **Queue → Schedule** shows your best hours from the heat map ("Use my best times"), and picking 1 to 4 posts a day uses your best hours when there's enough data.
+- **All caught up** is no longer blank: what's up next, skipped posts that did well on X (bring them back), how far back your X posts go (import older ones without re-reading what you have), and your best time to post.
+
 ## Dashboard (old posts + scheduler)
 Click the extension icon to open it.
 - **Import from X** opens your profile and auto-scrolls to save your posts (hit Stop anytime). Your posts also get saved in the background whenever you browse X.

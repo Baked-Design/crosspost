@@ -52,6 +52,7 @@
         <button class="btn ghost" id="importArchiveBtn">Import archive</button>
       </div>
       <input type="file" id="archiveFile" accept=".js,.json" hidden>
+      <div id="rvMore"></div>
     </div>
   </section>
 
@@ -79,6 +80,7 @@
           <input class="input" id="slotTimes" placeholder="09:00-11:00, 20:00-23:00" spellcheck="false">
           <p class="fine">One post per time. A range like 20:00-23:00 picks a minute inside it. A single time like 9:17 posts right then.</p>
           <label class="opt inline sched-nat"><input type="checkbox" id="slotNatural"><span>Natural times (9:17, 8:23pm), not on the hour</span></label>
+          <p class="sched-best" id="schedBest" hidden></p>
           <p class="fine total"><b id="perWeekTxt"></b> · the weekly goal follows this</p>
         </div>
       </div>
@@ -97,6 +99,7 @@
         <button class="icon-btn" id="calPrev" title="Previous month"><i data-i="chevl"></i></button>
         <button class="btn sm ghost" id="calToday">Today</button>
         <button class="icon-btn" id="calNext" title="Next month"><i data-i="chevr"></i></button>
+        <div class="pop-wrap"><button class="btn sm" id="rtBtn"><i data-i="clock"></i>Better times</button><div class="rt-pop" id="rtPop" hidden></div></div>
       </div>
     </div>
     <div class="cal-legend">
