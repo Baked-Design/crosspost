@@ -1113,7 +1113,7 @@ function queueCard(q) {
   const p = state.byId.get(q.tweetId);
   const el = document.createElement("div");
   el.className = "qcard";
-  const thumb = q.visual === "images" && q.images?.length ? `<img src="${esc(smallImg(q.images[0]))}" alt="">` : q.visual === "card" ? `<img data-card alt="">` : "";
+  const thumb = q.visual === "video" ? `<img data-vposter alt="">` : q.visual === "images" && q.images?.length ? `<img src="${esc(smallImg(q.images[0]))}" alt="">` : q.visual === "card" ? `<img data-card alt="">` : "";
   const visLabel = q.visual === "video" ? `${icon("video")}Video` : q.visual === "card" ? `${icon("card")}Tweet card` : q.visual === "images" && q.images?.length ? `${icon("image")}${q.images.length} image${q.images.length > 1 ? "s" : ""}` : `${icon("text")}Text only`;
   el.innerHTML = `
     <div class="qcard-b"><p>${esc(q.text)}</p>${thumb}</div>
@@ -1134,6 +1134,10 @@ function queueCard(q) {
   });
   el.addEventListener("dragend", () => document.body.classList.remove("dragging"));
   el.querySelector('[data-a="move"]').onclick = ev => { ev.stopPropagation(); schedPop(ev.currentTarget, q); };
+  if (q.visual === "video") {
+    const vid = q.videoFrom || q.tweetId, set = v => { const im = el.querySelector("[data-vposter]"); if (im && v && v.poster) im.src = v.poster; else if (im) im.remove(); };
+    if (vidCache.has(vid)) set(vidCache.get(vid)); else send({ type: "videoPreview", tweetId: vid }).then(v => { vidCache.set(vid, v); set(v); }).catch(() => set(null));
+  }
   if (q.visual === "card" && q.cardData) {
     send({ type: "renderCard", cardData: q.cardData }).then(r => (el.querySelector("[data-card]").src = r.dataUrl)).catch(() => {});
   }
@@ -1732,11 +1736,30 @@ function renderPreview() {
   }
 
   const media = $("liMedia");
+  if (cs.vis !== "video") media.dataset.vid = "";
   if (cs.vis === "card") media.innerHTML = cs.cardUrl ? `<img src="${cs.cardUrl}" alt="">` : `<div class="loading"></div>`;
   else if (cs.vis === "images") {
     const sel = [...$("cImgs").querySelectorAll("input:checked")].map(i => i.value);
     media.innerHTML = !sel.length ? "" : sel.length === 1 ? `<img src="${esc(sel[0])}" alt="">` : `<div class="grid2">${sel.slice(0, 4).map(u => `<img src="${esc(u)}" alt="">`).join("")}</div>`;
-  } else media.innerHTML = "";
+  } else if (cs.vis === "video") renderVideoPreview(media);
+  else media.innerHTML = "";
+}
+// the post's own video in the preview: its first frame straight away, then the video once it can play
+const vidCache = new Map();
+function renderVideoPreview(media) {
+  const id = cs.videoFrom || state.current;
+  const show = v => {
+    if (cs.vis !== "video" || (cs.videoFrom || state.current) !== id) return;
+    if (!v || (!v.url && !v.poster)) return (media.innerHTML = `<div class="li-vid-none">Video from X. LinkedIn shows it here once it's posted.</div>`);
+    if (media.dataset.vid === id && media.querySelector("video, img")) return;
+    media.dataset.vid = id;
+    media.innerHTML = v.url
+      ? `<video class="li-vid" src="${esc(v.url)}"${v.poster ? ` poster="${esc(v.poster)}"` : ""} muted playsinline loop controls preload="metadata"></video>`
+      : `<img src="${esc(v.poster)}" alt="">`;
+  };
+  if (media.dataset.vid !== id) { media.dataset.vid = ""; media.innerHTML = `<div class="loading"></div>`; }
+  if (vidCache.has(id)) return show(vidCache.get(id));
+  send({ type: "videoPreview", tweetId: id }).then(v => { vidCache.set(id, v); show(v); }).catch(() => show(null));
 }
 
 // hook check

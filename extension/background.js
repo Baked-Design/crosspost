@@ -262,6 +262,20 @@ async function uploadImage(src, auth) {
 
 // ---------- video: the X post's own video, re-uploaded to LinkedIn ----------
 // The video's address comes from X's public post endpoint at posting time (X's links expire), and only from X's video servers.
+// the video and its first frame, for the dashboard's LinkedIn preview
+async function xVideoPreview(tweetId) {
+  if (!/^\d{5,25}$/.test(String(tweetId || ""))) return null;
+  const token = ((Number(tweetId) / 1e15) * Math.PI).toString(36).replace(/(0+|\.)/g, "");
+  const r = await fetch(`https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}&token=${token}&lang=en`, { credentials: "omit" });
+  if (!r.ok) return null;
+  const j = await r.json();
+  const m = [...(j.mediaDetails || []), ...((j.quoted_tweet || {}).mediaDetails || [])].find(x => x.type === "video" || x.type === "animated_gif");
+  if (!m) return null;
+  const v = ((m.video_info || {}).variants || []).filter(x => x.content_type === "video/mp4" && /^https:\/\/video\.twimg\.com\//.test(x.url || "")).sort((a, b) => (a.bitrate || 0) - (b.bitrate || 0));
+  const poster = /^https:\/\/pbs\.twimg\.com\//.test(m.media_url_https || "") ? m.media_url_https : null;
+  // a mid-size version: plays smoothly in a preview, the full one is what goes to LinkedIn
+  return { poster, url: (v[Math.min(1, v.length - 1)] || {}).url || null, gif: m.type === "animated_gif" };
+}
 async function xVideoUrl(tweetId) {
   if (!/^\d{5,25}$/.test(String(tweetId || ""))) throw new Error("No X post to take the video from.");
   const token = ((Number(tweetId) / 1e15) * Math.PI).toString(36).replace(/(0+|\.)/g, "");
@@ -865,6 +879,9 @@ const handlers = {
   async rewrite({ text }) {
     const s = await getSettings();
     return { text: await rewriteWithClaude(text, { ...s, anthropicKey: s.anthropicKey }) };
+  },
+  async videoPreview({ tweetId }) {
+    return (await xVideoPreview(tweetId).catch(() => null)) || {};
   },
   async postNow({ tweetId, text, images, visual, cardData, videoFrom }) {
     if (!claim(tweetId)) throw new Error("This post is already being sent to LinkedIn.");
