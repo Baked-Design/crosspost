@@ -169,7 +169,7 @@
       Toast.active = null;
       document.querySelectorAll("#xli-toast-host").forEach(n => n.remove());
     },
-    open({ xText, images, hasVideo, tweetId, getImages, getXText, onEdit, onDone, allowQueue, title, visual, visualMode, getCardData }) {
+    open({ xText, images, hasVideo, videoFrom, tweetId, getImages, getXText, onEdit, onDone, allowQueue, title, visual, visualMode, getCardData }) {
       Toast.closeActive();
       const host = document.createElement("div");
       host.id = "xli-toast-host";
@@ -234,6 +234,7 @@
             <div class="vis">
               <img class="thumb" hidden alt="">
               <select title="What image goes with the LinkedIn post">
+                <option value="video">Post video</option>
                 <option value="images">Post images</option>
                 <option value="none">Text only</option>
                 <option value="card">Tweet card</option>
@@ -286,10 +287,15 @@
       const big = $(".big");
       let curImgs = images || [];
       const pickImgs = () => (getImages ? getImages() : curImgs);
-      let vis = visual || (window.XLIParse ? XLIParse.visualFor(visualMode || "auto", curImgs.length > 0) : curImgs.length ? "images" : "none");
+      let vis = visual || (window.XLIParse ? XLIParse.visualFor(visualMode || "auto", curImgs.length > 0, !!hasVideo) : curImgs.length ? "images" : "none");
+      let curVid = !!hasVideo;
       let cardKey = "";
       const renderThumb = async () => {
         if (vis === "none") {
+          thumb.hidden = true;
+          return;
+        }
+        if (vis === "video") {
           thumb.hidden = true;
           return;
         }
@@ -317,26 +323,30 @@
       thumb.addEventListener("mouseleave", () => (big.hidden = true));
       const renderMeta = (imgs, vid) => {
         curImgs = imgs || [];
+        curVid = !!vid;
+        sel.querySelector('option[value="video"]').disabled = !curVid;
         sel.querySelector('option[value="images"]').disabled = !curImgs.length;
+        if (vis === "video" && !curVid) vis = curImgs.length ? "images" : "none";
         sel.querySelector('option[value="card"]').disabled = !getCardData;
         if (vis === "images" && !curImgs.length) vis = "none";
         if (vis === "card" && !getCardData) vis = curImgs.length ? "images" : "none";
         sel.value = vis;
-        $(".meta").textContent = vis === "images" ? `${curImgs.length} image${curImgs.length > 1 ? "s" : ""}` : vis === "card" ? "screenshot of your post" : "";
-        warn.hidden = !vid || vis === "card";
-        warn.textContent = "Video/GIF isn't carried over.";
+        $(".meta").textContent = vis === "video" ? "your video, uploaded to LinkedIn" : vis === "images" ? `${curImgs.length} image${curImgs.length > 1 ? "s" : ""}` : vis === "card" ? "screenshot of your post" : "";
+        warn.hidden = !vid || vis === "card" || vis === "video";
+        warn.textContent = "The video stays on X. Pick \"Post video\" to take it to LinkedIn.";
         cardKey = vis === "card" ? cardKey : "";
         renderThumb();
       };
       sel.addEventListener("change", () => {
         vis = sel.value;
         if (timer) stopCountdown();
-        renderMeta(curImgs, hasVideo);
+        renderMeta(curImgs, curVid);
       });
       const visualPayload = () => ({
         images: vis === "images" ? pickImgs() : [],
         visual: vis,
-        cardData: vis === "card" && getCardData ? getCardData() : null
+        cardData: vis === "card" && getCardData ? getCardData() : null,
+        videoFrom: vis === "video" ? videoFrom || tweetId : null
       });
       ta.value = xText;
       status.textContent = "Preparing…";
@@ -370,7 +380,7 @@
         try {
           const r = await send({ type: "publish", text: ta.value.trim(), ...visualPayload(), xText: getXText ? getXText() : xText, tweetId });
           status.textContent = "";
-          $(".body").innerHTML = `<div class="done"><span class="ok"><svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></svg></span><span style="flex:1">Posted to LinkedIn${r.imageCount ? ` with ${r.visual === "card" ? "tweet card" : r.imageCount + " image" + (r.imageCount > 1 ? "s" : "")}` : ""}</span><a href="${r.url}" target="_blank" rel="noopener">View post</a></div>`;
+          $(".body").innerHTML = `<div class="done"><span class="ok"><svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></svg></span><span style="flex:1">Posted to LinkedIn${r.video ? " with your video" : r.imageCount ? ` with ${r.visual === "card" ? "tweet card" : r.imageCount + " image" + (r.imageCount > 1 ? "s" : "")}` : ""}</span><a href="${r.url}" target="_blank" rel="noopener">View post</a></div>`;
           $(".row").remove();
           close(6000);
         } catch (e) {
@@ -498,6 +508,7 @@
         },
         update({ xText: t, images: imgs, hasVideo: vid, keepText }) {
           if (!keepText) ta.value = t;
+          if (vid && !curVid && vis !== "card") vis = "video"; // the video showed up after the pop-up opened
           renderMeta(imgs, vid);
         },
         error(msg) {

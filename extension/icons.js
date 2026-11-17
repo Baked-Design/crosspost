@@ -18,6 +18,7 @@
     image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>',
     card: '<rect x="5" y="2.5" width="14" height="19" rx="2"/><circle cx="9" cy="7" r="1.5"/><path d="M8.5 12h7M8.5 15.5h5"/>',
     text: '<path d="M4 6h16M4 12h10M4 18h14"/>',
+    video: '<rect x="2.5" y="5" width="14" height="14" rx="2.5"/><path d="m16.5 10 5-3v10l-5-3Z"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     check: '<path d="M20 6 9 17l-5-5"/>',
     alert: '<path d="M12 8v5M12 16.5v.5"/><circle cx="12" cy="12" r="9"/>',

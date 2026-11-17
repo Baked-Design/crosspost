@@ -102,10 +102,10 @@
   }
 
   // Which visual to attach on LinkedIn, given the setting and whether the post has photos
-  function visualFor(mode, hasImages) {
+  function visualFor(mode, hasImages, hasVideo) {
     if (mode === "none") return "none";
     if (mode === "card") return "card";
-    if (mode === "images") return hasImages ? "images" : "none";
+    if (hasVideo) return "video"; // the post's own video goes with it
     return hasImages ? "images" : "none"; // auto: the post as it is, card only when chosen
   }
   // What goes on the tweet card: the original post as it looks on X

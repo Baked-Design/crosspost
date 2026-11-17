@@ -103,6 +103,7 @@
       xText: bundle.queued ? bundle.queued.text : text,
       images,
       hasVideo,
+      videoFrom: (parts.find(p => p.hasVideo) || {}).id || id,
       tweetId: id,
       allowQueue: true,
       title: parts.length > 1 ? `Post thread (${parts.length}) to LinkedIn` : "Post to LinkedIn"

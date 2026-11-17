@@ -260,6 +260,79 @@ async function uploadImage(src, auth) {
   return value.image; // urn:li:image:...
 }
 
+// ---------- video: the X post's own video, re-uploaded to LinkedIn ----------
+// The video's address comes from X's public post endpoint at posting time (X's links expire), and only from X's video servers.
+async function xVideoUrl(tweetId) {
+  if (!/^\d{5,25}$/.test(String(tweetId || ""))) throw new Error("No X post to take the video from.");
+  const token = ((Number(tweetId) / 1e15) * Math.PI).toString(36).replace(/(0+|\.)/g, "");
+  // a brand-new post's video can take a little while to show up at X's public endpoint
+  let status = 0;
+  for (let i = 0; i < 8; i++) {
+    if (i) await new Promise(res => setTimeout(res, 4000));
+    let j;
+    try {
+      const r = await fetch(`https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}&token=${token}&lang=en`, { credentials: "omit", cache: "no-store" });
+      status = r.status;
+      if (!r.ok) continue;
+      j = await r.json();
+    } catch { continue; }
+    const media = [...(j.mediaDetails || []), ...((j.quoted_tweet || {}).mediaDetails || [])].find(m => m.type === "video" || m.type === "animated_gif");
+    const variants = ((media && media.video_info && media.video_info.variants) || [])
+      .filter(v => v.content_type === "video/mp4" && /^https:\/\/video\.twimg\.com\//.test(v.url || ""))
+      .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+    if (variants.length) return variants[0].url;
+  }
+  throw new Error(`X didn't share a downloadable video for this post${status && status !== 200 ? " (" + status + ")" : ""}. Try "Tweet card".`);
+}
+
+async function waitForVideo(urn, auth) {
+  const { liVersion } = await chrome.storage.local.get("liVersion");
+  const deadline = Date.now() + 4 * 60e3; // LinkedIn processes video for up to a few minutes
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 4000));
+    let res;
+    try {
+      res = await fetch("https://api.linkedin.com/rest/videos/" + encodeURIComponent(urn), {
+        headers: { Authorization: "Bearer " + auth.accessToken, "LinkedIn-Version": liVersion || recentVersions()[1], "X-Restli-Protocol-Version": "2.0.0" }
+      });
+    } catch { continue; }
+    if (!res.ok) return; // can't read the status: LinkedIn finishes processing after the post goes up
+    let st = "";
+    try { st = (await res.json()).status || ""; } catch {}
+    if (st === "AVAILABLE") return;
+    if (st === "PROCESSING_FAILED") throw new Error("LinkedIn couldn't process the video. Try \"Tweet card\" instead.");
+  }
+}
+
+async function uploadVideo(tweetId, auth) {
+  const url = await xVideoUrl(tweetId);
+  const dl = await fetch(url, { credentials: "omit" });
+  if (!dl.ok) throw new Error(`Couldn't download the video from X (${dl.status}).`);
+  const blob = await dl.blob();
+  if (blob.size < 75 * 1024) throw new Error("This video is too short for LinkedIn (it needs at least 3 seconds). Try \"Tweet card\".");
+  if (blob.size > 500 * 1024 * 1024) throw new Error("This video is over LinkedIn's 500 MB limit.");
+  const init = await liFetch("/rest/videos?action=initializeUpload", {
+    method: "POST",
+    auth,
+    body: { initializeUploadRequest: { owner: auth.personUrn, fileSizeBytes: blob.size, uploadCaptions: false, uploadThumbnail: false } }
+  });
+  const { value } = await init.json();
+  if (!value?.video || !value.uploadInstructions?.length) throw new Error("LinkedIn didn't return an upload link for the video.");
+  const parts = [];
+  for (const ins of value.uploadInstructions) {
+    const put = await fetch(ins.uploadUrl, { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: blob.slice(ins.firstByte, ins.lastByte + 1) });
+    if (!put.ok) throw new Error(`LinkedIn rejected the video upload (${put.status}).`);
+    parts.push((put.headers.get("etag") || "").replace(/"/g, ""));
+  }
+  await liFetch("/rest/videos?action=finalizeUpload", {
+    method: "POST",
+    auth,
+    body: { finalizeUploadRequest: { video: value.video, uploadToken: value.uploadToken || "", uploadedPartIds: parts } }
+  });
+  await waitForVideo(value.video, auth);
+  return value.video; // urn:li:video:...
+}
+
 // LinkedIn "little text" format: these characters must be backslash-escaped
 // or the post fails / gets cut off.
 // Hashtags are turned into LinkedIn's clickable hashtag syntax.
@@ -271,7 +344,7 @@ function escapeLittleText(s) {
 
 // visual: "card" renders the tweet card, "none" posts text only, anything else uses `images`
 async function resolveVisual({ images = [], visual, cardData }) {
-  if (visual === "none") return [];
+  if (visual === "none" || visual === "video") return [];
   if (visual === "card" && cardData) return [await renderCard(cardData)];
   return images;
 }
@@ -289,10 +362,11 @@ async function renderCard(cardData) {
   });
 }
 
-async function publishToLinkedIn({ text, images = [], visual, cardData }) {
+async function publishToLinkedIn({ text, images = [], visual, cardData, tweetId, videoFrom }) {
   if (String(text || "").length > 3000) throw new Error(`This post is ${String(text).length.toLocaleString()} characters. LinkedIn allows 3,000: open it in the dashboard and trim it.`);
   images = await resolveVisual({ images, visual, cardData });
   const auth = await requireAuth();
+  const videoUrn = visual === "video" ? await uploadVideo(videoFrom || tweetId, auth) : null;
   const imageUrns = [];
   for (const img of (images || []).filter(Boolean).slice(0, 9)) imageUrns.push(await uploadImage(img, auth));
 
@@ -304,13 +378,14 @@ async function publishToLinkedIn({ text, images = [], visual, cardData }) {
     lifecycleState: "PUBLISHED",
     isReshareDisabledByAuthor: false
   };
+  if (videoUrn) post.content = { media: { id: videoUrn } };
   if (imageUrns.length === 1) post.content = { media: { id: imageUrns[0] } };
   if (imageUrns.length > 1) post.content = { multiImage: { images: imageUrns.map(id => ({ id })) } };
 
   const res = await liFetch("/rest/posts", { method: "POST", auth, body: post });
   const urn = res.headers.get("x-restli-id") || res.headers.get("x-linkedin-id") || "";
   const url = urn ? "https://www.linkedin.com/feed/update/" + urn + "/" : "https://www.linkedin.com/in/me/recent-activity/all/";
-  return { urn, url, imageCount: imageUrns.length, visual: visual || (imageUrns.length ? "images" : "none") };
+  return { urn, url, imageCount: imageUrns.length, video: !!videoUrn, visual: visual || (imageUrns.length ? "images" : "none") };
 }
 
 // ---------- Claude rewrite ----------
@@ -461,7 +536,7 @@ async function processQueue() {
     if (!item) return;
 
     try {
-      const r = await publishToLinkedIn({ text: item.text, images: item.images || [], visual: item.visual, cardData: item.cardData });
+      const r = await publishToLinkedIn({ text: item.text, images: item.images || [], visual: item.visual, cardData: item.cardData, tweetId: item.tweetId, videoFrom: item.videoFrom });
       await withLock(async () => {
         const { queue } = await getStore();
         await chrome.storage.local.set({ queue: queue.filter(q => q.qid !== item.qid) });
@@ -641,7 +716,7 @@ const handlers = {
     }
     return { linkedinText, rewriteError, mode: s.mode, countdownSeconds: s.countdownSeconds };
   },
-  async publish({ text, images, xText, tweetId, visual, cardData }) {
+  async publish({ text, images, xText, tweetId, visual, cardData, videoFrom }) {
     const { liStatus } = await getStore();
     const prev = tweetId && liStatus[tweetId];
     if (prev?.state === "posted") throw new Error("Already on LinkedIn. Open the dashboard if you want to post it again.");
@@ -650,7 +725,7 @@ const handlers = {
     if (!claim(tweetId)) throw new Error("This post is already being sent to LinkedIn.");
     await recordPosted(tweetId, { state: "posting", at: Date.now() });
     try {
-      const result = await publishToLinkedIn({ text, images, visual, cardData });
+      const result = await publishToLinkedIn({ text, images, visual, cardData, tweetId, videoFrom });
       await addHistory({ ok: true, xText, text, url: result.url, imageCount: result.imageCount, visual: result.visual });
       await recordPosted(tweetId, { state: "posted", url: result.url, at: Date.now(), text, images: (images || []).filter(x => typeof x === "string").slice(0, 4), visual: result.visual });
       if (tweetId)
@@ -791,7 +866,7 @@ const handlers = {
     const s = await getSettings();
     return { text: await rewriteWithClaude(text, { ...s, anthropicKey: s.anthropicKey }) };
   },
-  async postNow({ tweetId, text, images, visual, cardData }) {
+  async postNow({ tweetId, text, images, visual, cardData, videoFrom }) {
     if (!claim(tweetId)) throw new Error("This post is already being sent to LinkedIn.");
     await recordPosted(tweetId, { state: "posting", at: Date.now() });
     await withLock(async () => {
@@ -800,7 +875,7 @@ const handlers = {
       if (q) { Object.assign(q, { status: "posting", postingAt: Date.now(), error: undefined }); await chrome.storage.local.set({ queue }); }
     });
     try {
-      const r = await publishToLinkedIn({ text, images, visual, cardData });
+      const r = await publishToLinkedIn({ text, images, visual, cardData, tweetId, videoFrom });
       await recordPosted(tweetId, { state: "posted", url: r.url, at: Date.now(), text, images: (images || []).filter(x => typeof x === "string").slice(0, 4), visual: r.visual });
       await addHistory({ ok: true, xText: text, text, url: r.url, imageCount: r.imageCount, visual: r.visual });
       // if it was queued, drop it from the queue
@@ -866,6 +941,7 @@ const handlers = {
         images: i.images || [],
         visual: i.visual || "images",
         cardData: i.cardData || null,
+        videoFrom: i.visual === "video" ? i.videoFrom || i.tweetId : null,
         at: i.at || slots.shift(),
         queuedAt: Date.now(),
         status: "scheduled"

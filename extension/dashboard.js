@@ -781,9 +781,11 @@ function itemFor(id) {
   const p = state.byId.get(id);
   const parts = threadOf(p);
   const imgs = parts.flatMap(x => x.images || []).slice(0, 9).map(bigImg);
-  const visual = XLIParse.visualFor(state.settings.visualMode || "auto", imgs.length > 0);
+  const vidPart = parts.find(x => x.hasVideo);
+  const visual = XLIParse.visualFor(state.settings.visualMode || "auto", imgs.length > 0, !!vidPart);
   return {
     tweetId: id,
+    videoFrom: visual === "video" ? vidPart.id : null,
     text: parts.map(x => x.text).filter(Boolean).join("\n\n"),   // never cut silently: long posts go to the editor instead
     images: visual === "images" ? imgs : [],
     visual,
@@ -1033,7 +1035,7 @@ function queueCard(q) {
   const el = document.createElement("div");
   el.className = "qcard";
   const thumb = q.visual === "images" && q.images?.length ? `<img src="${esc(smallImg(q.images[0]))}" alt="">` : q.visual === "card" ? `<img data-card alt="">` : "";
-  const visLabel = q.visual === "card" ? `${icon("card")}Tweet card` : q.visual === "images" && q.images?.length ? `${icon("image")}${q.images.length} image${q.images.length > 1 ? "s" : ""}` : `${icon("text")}Text only`;
+  const visLabel = q.visual === "video" ? `${icon("video")}Video` : q.visual === "card" ? `${icon("card")}Tweet card` : q.visual === "images" && q.images?.length ? `${icon("image")}${q.images.length} image${q.images.length > 1 ? "s" : ""}` : `${icon("text")}Text only`;
   el.innerHTML = `
     <div class="qcard-b"><p>${esc(q.text)}</p>${thumb}</div>
     ${q.error ? `<div class="err">${esc(q.error)}</div>` : ""}
@@ -1091,7 +1093,7 @@ function queueCard(q) {
     b.disabled = true;
     b.lastChild.textContent = "Posting…";
     try {
-      await send({ type: "postNow", tweetId: q.tweetId, text: q.text, images: q.images, visual: q.visual, cardData: q.cardData });
+      await send({ type: "postNow", tweetId: q.tweetId, text: q.text, images: q.images, visual: q.visual, cardData: q.cardData, videoFrom: q.videoFrom });
       toast("Posted to LinkedIn");
     } catch (err) {
       toast("Failed: " + err.message);
@@ -1108,7 +1110,7 @@ async function unqueue(q) {
   await send({ type: "removeQueueItem", qid: q.qid });
   await load();
   toastUndo("Unqueued. It's back in Review.", async () => {
-    await send({ type: "enqueue", items: [{ tweetId: q.tweetId, text: q.text, images: q.images, visual: q.visual, cardData: q.cardData, at: q.at }] });
+    await send({ type: "enqueue", items: [{ tweetId: q.tweetId, text: q.text, images: q.images, visual: q.visual, cardData: q.cardData, videoFrom: q.videoFrom, at: q.at }] });
     await load();
   });
 }
@@ -1539,8 +1541,9 @@ function openComposer(id) {
     $("cVis").querySelector('[data-v="images"]').lastChild.textContent = imgs.length ? `Post images (${imgs.length})` : "Post images";
     cs.cardData = XLIParse.cardDataFor({ ...p, images: (p.images || []).map(bigImg) });
     cs.hasVideo = parts.some(x => x.hasVideo);
+    cs.videoFrom = (parts.find(x => x.hasVideo) || {}).id || null;
     cs.expanded = false;
-    setVis(q && q.visual ? q.visual : XLIParse.visualFor(state.settings.visualMode || "auto", imgs.length > 0));
+    setVis(q && q.visual ? q.visual : XLIParse.visualFor(state.settings.visualMode || "auto", imgs.length > 0, cs.hasVideo));
     resetHook();
     if (parts.some(x => x.truncated)) msg("info", "Long post: only the preview text was saved. Open it on X once to grab the full text, or paste it in.");
     updateCount();
@@ -1601,20 +1604,22 @@ function payload() {
   if (text.length > 3000) throw new Error("LinkedIn posts max out at 3,000 characters.");
   const images = cs.vis === "images" ? [...$("cImgs").querySelectorAll("input:checked")].map(i => i.value) : [];
   if (cs.vis === "images" && !images.length) throw new Error("Pick at least one image, or switch the visual.");
-  return { tweetId: state.current, text, images, visual: cs.vis, cardData: cs.vis === "card" ? cs.cardData : null };
+  return { tweetId: state.current, text, images, visual: cs.vis, cardData: cs.vis === "card" ? cs.cardData : null, videoFrom: cs.vis === "video" ? cs.videoFrom : null };
 }
 
 // visual
 function setVis(v) {
   if (v === "images" && !cs.hasImages) v = "none";
+  if (v === "video" && !cs.hasVideo) v = cs.hasImages ? "images" : "none";
   cs.vis = v;
   $("cVis").querySelectorAll("button").forEach(b => {
     b.classList.toggle("on", b.dataset.v === v);
     if (b.dataset.v === "images") b.disabled = !cs.hasImages;
+    if (b.dataset.v === "video") b.hidden = !cs.hasVideo;
   });
   $("cImgs").hidden = v !== "images";
-  $("cVideo").hidden = !cs.hasVideo || v === "card";
-  $("cVisHint").textContent = v === "card" ? "Screenshot of your post, fills the feed" : v === "images" ? "Your post's own photos" : "Text-only posts get 2 lines in the feed";
+  $("cVideo").hidden = !cs.hasVideo || v === "card" || v === "video";
+  $("cVisHint").textContent = v === "video" ? "Your post's video, uploaded to LinkedIn" : v === "card" ? "Screenshot of your post, fills the feed" : v === "images" ? "Your post's own photos" : "Text-only posts get 2 lines in the feed";
   if (v === "card") {
     const key = JSON.stringify(cs.cardData);
     if (key !== cs.cardKey) {
