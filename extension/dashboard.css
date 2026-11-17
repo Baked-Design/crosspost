@@ -468,3 +468,7 @@ body.has-side .stage { padding-right: 412px; transition: padding-right .22s cubi
   .side-post { top: auto; left: 12px; right: 12px; bottom: 12px; width: auto; max-height: 72vh; }
 }
 @media (prefers-reduced-motion: reduce) { .side-post { animation: none; } body.has-side .stage { transition: none; } }
+
+.ins-fresh { margin: 0 0 14px; font-size: 12.5px; color: var(--muted); }
+.ins-fresh.old { color: var(--text); }
+.ins-fresh .linkbtn { font-size: 12.5px; }

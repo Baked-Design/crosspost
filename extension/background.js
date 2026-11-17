@@ -780,10 +780,10 @@ const handlers = {
         const prev = xposts[p.id] || {};
         if (p.src === "dom" && prev.id && prev.src !== "dom") {
           // page-scraped copy is less complete (no thread links, long posts cut off): only refresh counts
-          Object.assign(prev, { likes: Math.max(prev.likes || 0, p.likes), views: Math.max(prev.views || 0, p.views) });
+          Object.assign(prev, { likes: Math.max(prev.likes || 0, p.likes), views: Math.max(prev.views || 0, p.views), seenAt: Date.now() });
           continue;
         }
-        xposts[p.id] = { ...prev, ...p, views: Math.max(prev.views || 0, p.views || 0) };
+        xposts[p.id] = { ...prev, ...p, views: Math.max(prev.views || 0, p.views || 0), seenAt: Date.now() }; // when these numbers were read
       }
       await chrome.storage.local.set({ xposts });
       return { added, total: Object.keys(xposts).length };

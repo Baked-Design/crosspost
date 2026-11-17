@@ -180,7 +180,11 @@ function renderInsights() {
   const feat = a.features.slice(0, 8).map(f => { const w = Math.min(50, Math.abs(Math.log2(f.lift)) * 30); return `<div class="ft"><span class="ft-l">${esc(f.label)} <em>${f.n}</em></span><span class="ft-b"><i class="${f.lift >= 1 ? "up" : "down"}" style="${f.lift >= 1 ? "left:50%" : "right:50%"};width:${w}%"></i></span><span class="ft-v ${f.lift >= 1 ? "up" : "down"}">${I.times(f.lift)}</span></div>`; }).join("");
   const posted = new Set(Object.keys(state.liStatus).filter(id => state.liStatus[id]?.state === "posted"));
   const sug = I.suggest(a, { notOnLinkedIn: plat === "x" ? posts.map(p => p.id).filter(id => !posted.has(id)) : [] });
-  box.innerHTML = `
+  // how fresh these numbers are: they're read when you browse your X profile or open your LinkedIn activity page
+  const seen = Math.max(0, ...posts.map(p => p.seenAt || 0)), age = seen ? Date.now() - seen : null;
+  const ago = age == null ? "" : age < 36e5 ? "in the last hour" : age < 864e5 ? Math.round(age / 36e5) + "h ago" : Math.round(age / 864e5) + (Math.round(age / 864e5) === 1 ? " day ago" : " days ago");
+  const fresh = `<p class="ins-fresh${age == null || age > 3 * 864e5 ? " old" : ""}">${plat === "li" ? "LinkedIn" : "X"} numbers ${seen ? "last read " + ago : "date unknown (read before this was tracked)"}. <button class="linkbtn" id="${plat === "li" ? "liRead" : "insImport3"}">Refresh now</button></p>`;
+  box.innerHTML = fresh + `
     <div class="ins-kpis">
       <div><b>${fmtN(a.count)}</b><span>posts in the last year</span></div>
       <div><b>${fmtN(a.baseline)}</b><span>${M} on a usual post</span></div>
@@ -217,7 +221,8 @@ function bindIns(a, posts) {
   const imp = () => startImport();
   if ($("insImport")) $("insImport").onclick = imp;
   if ($("insImport2")) $("insImport2").onclick = imp;
-  if ($("liRead")) $("liRead").onclick = async () => { try { await send({ type: "startLiImport" }); toast("Opened your LinkedIn activity. Leave it for a minute while it scrolls, then come back."); } catch (e) { toast(e.message); } };
+  if ($("insImport3")) $("insImport3").onclick = imp;
+  box.querySelectorAll("#liRead").forEach(b => b.onclick = async () => { try { await send({ type: "startLiImport" }); toast("Opened your LinkedIn activity. Leave it for a minute while it scrolls, then come back."); } catch (e) { toast(e.message); } });
   box.querySelectorAll("[data-queue-ids]").forEach(b => b.onclick = () => quickQueue(b.dataset.queueIds.split(",")));
   box.querySelectorAll("[data-copy]").forEach(b => b.onclick = async () => { try { await navigator.clipboard.writeText(state.ideas[+b.dataset.copy].draft); toast("Copied"); } catch { toast("Couldn't copy"); } });
   if ($("insIdeas")) $("insIdeas").onclick = async () => {
