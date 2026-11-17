@@ -864,7 +864,9 @@ $("bulkClear").onclick = () => {
 $("bulkQueue").onclick = () => quickQueue([...state.selected]);
 $("fillCancel").onclick = () => {
   state.fillAt = null;
-  go("queue");
+  const back = state.fillFrom || "queue";
+  state.fillFrom = null;
+  go(back);
 };
 
 // all caught up: what's coming, what you skipped that did well, how far back your posts go
@@ -918,6 +920,82 @@ $("archiveFile").onchange = async e => {
   }
   e.target.value = "";
 };
+
+// ---------- one way to pick a time, everywhere: open slots as one tap, or any day and time ----------
+function closeWhen() { const el = document.getElementById("whenPop"); if (el) el.remove(); }
+function whenPop(anchor, { at, title, verb, onPick, extra = [] }) {
+  closeWhen();
+  const base = new Date(at && at > Date.now() ? at : Date.now() + 3600_000);
+  const pad = n => String(n).padStart(2, "0");
+  const slots = openSlots(21).map(sl => sl.at).filter(t => !at || Math.abs(t - at) > 60_000).slice(0, 6);
+  const el = document.createElement("div");
+  el.id = "whenPop";
+  el.className = "whenpop";
+  el.setAttribute("role", "dialog");
+  el.innerHTML = `${title ? `<div class="wp-h">${esc(title)}</div>` : ""}
+    ${slots.length ? `<div class="lbl">Open slots</div><div class="wp-slots">${slots.map(t => `<button class="wp-chip" data-t="${t}">${esc(shortWhen(t))}</button>`).join("")}</div>` : ""}
+    <div class="lbl">${slots.length ? "Or any day and time" : "Day and time"}</div>
+    <div class="wp-row"><input class="input" type="date" data-d value="${base.getFullYear()}-${pad(base.getMonth() + 1)}-${pad(base.getDate())}"><input class="input" type="time" data-tm value="${pad(base.getHours())}:${pad(base.getMinutes())}"></div>
+    <button class="btn sm primary block" data-go>${esc(verb || "Schedule")}</button>
+    ${extra.length ? `<div class="wp-more">${extra.map((x, i) => `<button class="wp-link${x.danger ? " danger" : ""}" data-x="${i}">${esc(x.label)}</button>`).join("")}</div>` : ""}`;
+  document.body.appendChild(el);
+  el.addEventListener("click", e => e.stopPropagation());
+  el.addEventListener("pointerdown", e => e.stopPropagation());
+  const done = t => { closeWhen(); onPick(t); };
+  el.querySelectorAll("[data-t]").forEach(b => (b.onclick = () => done(+b.dataset.t)));
+  el.querySelector("[data-go]").onclick = () => {
+    const [y, m, d] = el.querySelector("[data-d]").value.split("-").map(Number);
+    const [h, mi] = el.querySelector("[data-tm]").value.split(":").map(Number);
+    const t = new Date(y, m - 1, d, h, mi).getTime();
+    if (!t || t < Date.now() + 30_000) return toast("Pick a time in the future.");
+    done(t);
+  };
+  el.querySelectorAll("[data-x]").forEach(b => (b.onclick = () => { closeWhen(); extra[+b.dataset.x].run(); }));
+  // beside what you clicked on a big screen, a sheet at the bottom on a phone
+  if (innerWidth > 640 && anchor) {
+    const r = anchor.getBoundingClientRect(), w = el.offsetWidth, h = el.offsetHeight;
+    let top = r.bottom + 6;
+    if (top + h > innerHeight - 12) top = Math.max(12, r.top - h - 6);
+    el.style.left = Math.min(Math.max(12, r.left), innerWidth - w - 12) + "px";
+    el.style.top = top + "px";
+  } else el.classList.add("sheet");
+  setTimeout(() => el.querySelector(".wp-chip, [data-go]")?.focus(), 30);
+}
+document.addEventListener("click", closeWhen);
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeWhen(); });
+// what you can do with a scheduled post: move it, edit it, take it out
+function schedPop(anchor, q) {
+  whenPop(anchor, {
+    at: q.at,
+    title: `Scheduled ${shortWhen(q.at)}`,
+    verb: "Move here",
+    onPick: t => moveQueued(q.qid, t),
+    extra: [
+      ...(state.byId.get(q.tweetId) ? [{ label: "Edit post", run: () => openComposer(q.tweetId) }] : []),
+      { label: "Unqueue", danger: true, run: () => unqueue(q) }
+    ]
+  });
+}
+// a suggested post: schedule it at its slot or any other time
+function suggPop(anchor, id, at) {
+  whenPop(anchor, {
+    at,
+    title: "Suggested post",
+    verb: `Schedule`,
+    onPick: t => acceptSuggestion(t, id),
+    extra: [
+      { label: "Edit first", run: () => { state.fillAt = at; openComposer(id); } },
+      { label: "Not for LinkedIn", danger: true, run: () => markFit(id, "personal") }
+    ]
+  });
+}
+// leave for the library to pick a post for an open slot, and come back where you were
+function pickFor(at) {
+  state.fillAt = at;
+  state.fillFrom = state.view === "library" ? state.fillFrom : state.view;
+  state.status = "open";
+  go("library");
+}
 
 // ---------- queue ----------
 // open slots from now on (objects from XLISlots: {at, dayStart, w, s, e})
@@ -1011,22 +1089,23 @@ function emptySlot(at) {
       ${img ? `<img src="${esc(smallImg(img))}" alt="">` : ""}
       <div class="so-act">
         <button class="icon-btn" data-a="pass" title="Not for LinkedIn (won't suggest again)">${icon("x")}</button>
+        <button class="btn sm ghost" data-a="when">${icon("clock")}Other time</button>
         <button class="btn sm" data-a="edit">Edit</button>
         <button class="btn sm primary" data-a="add">Add</button>
       </div>`;
     el.querySelector('[data-a="add"]').onclick = () => acceptSuggestion(at, p.id);
     el.querySelector('[data-a="pass"]').onclick = () => markFit(p.id, "personal");
+    el.querySelector('[data-a="when"]').onclick = ev => { ev.stopPropagation(); suggPop(ev.currentTarget, p.id, at); };
+    el.dataset.sugg = p.id;
+    el.draggable = true;
+    el.title = "Drag onto another slot or day to schedule it there";
     el.querySelector('[data-a="edit"]').onclick = () => {
       state.fillAt = at;
       openComposer(p.id);
     };
   }
   const pick = el.querySelector('[data-a="pick"]');
-  if (pick) pick.onclick = () => {
-    state.fillAt = at;
-    state.status = "open";
-    go("library");
-  };
+  if (pick) pick.onclick = () => pickFor(at);
   return el;
 }
 
@@ -1042,15 +1121,7 @@ function queueCard(q) {
     <div class="qcard-f">
       <div class="meta">${q.status === "failed" ? `<span class="pill bad">${icon("alert")}Failed</span>` : q.status === "posting" ? `<span class="pill sched">Posting…</span>` : ""}<span class="tag">${visLabel}</span></div>
       ${p ? `<button class="btn sm ghost" data-a="edit">${icon("pencil")}Edit</button>` : ""}
-      <div class="pop-wrap">
-        <button class="btn sm ghost" data-a="move">${icon("clock")}Move</button>
-        <div class="pop up move-pop" hidden>
-          <button class="opt-btn" data-m="next">Next open slot</button>
-          <label class="lbl">Or pick a time</label>
-          <input class="input" type="datetime-local" data-m="at">
-          <button class="btn sm primary block" data-m="set">Move here</button>
-        </div>
-      </div>
+      <button class="btn sm ghost" data-a="move">${icon("clock")}Change time</button>
       <button class="btn sm ghost" data-a="now">${icon("send")}Post now</button>
       <button class="btn sm ghost danger" data-a="rm" title="Take it out of the queue. It goes back to Review.">${icon("x")}Unqueue</button>
     </div>`;
@@ -1062,28 +1133,7 @@ function queueCard(q) {
     document.body.classList.add("dragging");
   });
   el.addEventListener("dragend", () => document.body.classList.remove("dragging"));
-  const pop = el.querySelector(".move-pop");
-  el.querySelector('[data-a="move"]').onclick = ev => {
-    ev.stopPropagation();
-    document.querySelectorAll(".move-pop").forEach(x => x !== pop && (x.hidden = true));
-    pop.querySelector('[data-m="at"]').value = toLocalInput(q.at);
-    pop.hidden = !pop.hidden;
-  };
-  pop.addEventListener("click", ev => ev.stopPropagation());
-  pop.querySelector('[data-m="next"]').onclick = async () => {
-    try {
-      const r = await send({ type: "bumpQueueItem", qid: q.qid });
-      toast(`Moved to ${shortWhen(r.at)}`);
-    } catch (err) {
-      toast(err.message);
-    }
-    load();
-  };
-  pop.querySelector('[data-m="set"]').onclick = async () => {
-    const at = new Date(pop.querySelector('[data-m="at"]').value).getTime();
-    if (!at || at < Date.now() + 30_000) return toast("Pick a time in the future.");
-    await moveQueued(q.qid, at);
-  };
+  el.querySelector('[data-a="move"]').onclick = ev => { ev.stopPropagation(); schedPop(ev.currentTarget, q); };
   if (q.visual === "card" && q.cardData) {
     send({ type: "renderCard", cardData: q.cardData }).then(r => (el.querySelector("[data-card]").src = r.dataUrl)).catch(() => {});
   }
@@ -1130,20 +1180,31 @@ async function moveQueued(qid, at) {
   }
 }
 // something you can drop a queued post on. target() -> {at, qid?}: a slot time, or another post to trade places with
-let dragQid = null;
+let dragQid = null, dragSugg = null;
 document.addEventListener("dragstart", ev => {
   const el = ev.target.closest && ev.target.closest("[data-qid]");
   dragQid = el ? el.dataset.qid : null;
+  const sg = !dragQid && ev.target.closest && ev.target.closest("[data-sugg]");
+  dragSugg = sg ? { id: sg.dataset.sugg, at: +sg.dataset.at || 0 } : null;
+  if (dragSugg) {
+    ev.dataTransfer.setData("text/xli-sugg", dragSugg.id);
+    ev.dataTransfer.effectAllowed = "move";
+    document.body.classList.add("dragging");
+  }
 });
 document.addEventListener("dragend", () => {
   dragQid = null;
+  dragSugg = null;
+  document.body.classList.remove("dragging");
   document.querySelectorAll(".drop-on").forEach(x => x.classList.remove("drop-on"));
 });
 function dropTarget(el, target) {
   el.addEventListener("dragover", ev => {
-    if (!ev.dataTransfer.types.includes("text/xli-qid")) return;
+    const sugg = ev.dataTransfer.types.includes("text/xli-sugg");
+    if (!ev.dataTransfer.types.includes("text/xli-qid") && !sugg) return;
     const t = target();
     if (!t || (!t.qid && t.at < Date.now() + 60_000)) return;
+    if (sugg && t.qid) return; // a suggestion goes on an open time, not on top of a scheduled post
     ev.preventDefault();
     ev.stopPropagation(); // the innermost target wins (a slot inside a calendar day)
     el.classList.add("drop-on");
@@ -1152,7 +1213,9 @@ function dropTarget(el, target) {
   el.addEventListener("drop", async ev => {
     el.classList.remove("drop-on");
     const qid = ev.dataTransfer.getData("text/xli-qid");
+    const sid = ev.dataTransfer.getData("text/xli-sugg");
     const t = target();
+    if (sid && t && !t.qid) { ev.preventDefault(); ev.stopPropagation(); return acceptSuggestion(t.at, sid); }
     if (!qid || !t) return;
     ev.preventDefault();
     ev.stopPropagation();
@@ -1168,7 +1231,6 @@ function dropTarget(el, target) {
     } else await moveQueued(qid, t.at);
   });
 }
-document.addEventListener("click", () => document.querySelectorAll(".move-pop").forEach(x => (x.hidden = true)));
 
 function renderRhythm() {
   const r = state.rhythm;
@@ -1342,7 +1404,7 @@ function renderCalendar() {
       for (const it of items.slice(0, 4)) {
         const time = fmtTime(it.at).replace(":00", "").replace(" ", "").toLowerCase();
         if (it.kind === "open") html += `<button class="chip open" data-k="open" data-at="${it.at}"><span class="tm">${time}</span><span class="tx">Open slot</span></button>`;
-        else html += `<button class="chip ${it.kind}" data-k="${it.kind}" data-id="${esc(it.id)}" data-at="${it.at}"${it.qid ? ` data-qid="${esc(it.qid)}" draggable="true"` : ""} title="${esc(it.text.slice(0, 200))}"><span class="tm">${time}</span><span class="tx">${esc(it.text.replace(/\s+/g, " ").slice(0, 90))}</span>${it.kind === "sugg" ? `<i class="add" data-add="1">+</i>` : ""}</button>`;
+        else html += `<button class="chip ${it.kind}" data-k="${it.kind}" data-id="${esc(it.id)}" data-at="${it.at}"${it.qid ? ` data-qid="${esc(it.qid)}" draggable="true"` : it.kind === "sugg" ? ` data-sugg="${esc(it.id)}" draggable="true"` : ""} title="${esc(it.text.slice(0, 200))}"><span class="tm">${time}</span><span class="tx">${esc(it.text.replace(/\s+/g, " ").slice(0, 90))}</span>${it.kind === "sugg" ? `<i class="add" data-add="1">+</i>` : ""}</button>`;
       }
       if (items.length > 4) html += `<span class="more-n">+${items.length - 4} more</span>`;
       html += `</div>`;
@@ -1366,8 +1428,9 @@ function renderCalendar() {
     dropTarget(day, () => {
       const qid = dragQid;
       const q = qid && state.queue.find(x => x.qid === qid);
-      if (!q) return { at: +day.dataset.day + 12 * 3600e3 };
-      const t = new Date(q.at);
+      const from = q ? q.at : dragSugg && dragSugg.at;
+      if (!from) return { at: +day.dataset.day + 12 * 3600e3 };
+      const t = new Date(from);
       const d = new Date(+day.dataset.day);
       return { at: new Date(d.getFullYear(), d.getMonth(), d.getDate(), t.getHours(), t.getMinutes()).getTime() };
     })
@@ -1376,16 +1439,11 @@ function renderCalendar() {
     ch.addEventListener("click", e => {
       const at = +ch.dataset.at;
       const id = ch.dataset.id;
+      e.stopPropagation();
       if (ch.dataset.k === "sugg" && e.target.dataset.add) return acceptSuggestion(at, id);
-      if (ch.dataset.k === "sugg") {
-        state.fillAt = at;
-        return openComposer(id);
-      }
-      if (ch.dataset.k === "open") {
-        state.fillAt = at;
-        state.status = "open";
-        return go("library");
-      }
+      if (ch.dataset.k === "sugg") return suggPop(ch, id, at);
+      if (ch.dataset.k === "open") return pickFor(at);
+      if (ch.dataset.qid) { const q = state.queue.find(x => x.qid === ch.dataset.qid); if (q) return schedPop(ch, q); }
       if (ch.dataset.k === "posted") {
         const s = state.liStatus[id];
         if (s?.url) return window.open(s.url, "_blank");
@@ -1453,9 +1511,9 @@ function renderWeek() {
       const p = x.kind === "open" ? x.pick : state.byId.get(x.id);
       const time = fmtTime(x.at).replace(" ", "").toLowerCase();
       const sc = x.kind === "posted" ? null : slotScore(a, x.at);
-      if (x.kind === "open") return `<div class="wk-card open ${slotCls(sc)}" data-k="open" data-at="${x.at}">
+      if (x.kind === "open") return `<div class="wk-card open ${slotCls(sc)}" data-k="open" data-at="${x.at}"${p ? ` data-sugg="${esc(p.id)}" draggable="true" title="Drag to another day or slot"` : ""}>
           <div class="wk-meta"><span class="wk-time">${time}</span>${sc != null ? `<span class="wk-sc" title="${esc(slotTip(sc))}">${I.times(sc)}</span>` : ""}<span class="wk-st">Open</span></div>
-          ${p ? `<div class="wk-sug" title="${esc(p.text || "")}">${esc((p.text || "").replace(/\s+/g, " ").slice(0, 80))}</div>
+          ${p ? `<div class="wk-sug" data-sp="${esc(p.id)}" data-at="${x.at}" title="${esc(p.text || "")}">${esc((p.text || "").replace(/\s+/g, " ").slice(0, 80))}</div>
           <div class="wk-acts"><button class="wk-add" data-fill="${esc(p.id)}" data-at="${x.at}">Add this</button>${M(p) ? `<span class="wk-sv">𝕏 ${fmtN(M(p))}</span>` : ""}<button class="wk-other" data-pick="${x.at}" title="Pick another post">•••</button></div>`
             : `<div class="wk-acts"><button class="wk-add" data-pick="${x.at}">Pick a post</button></div>`}
         </div>`;
@@ -1481,14 +1539,16 @@ function renderWeek() {
   root.querySelectorAll(".wk-card[data-qid]").forEach(ch => ch.addEventListener("dragstart", ev => { ev.dataTransfer.setData("text/xli-qid", ch.dataset.qid); ev.dataTransfer.effectAllowed = "move"; }));
   root.querySelectorAll(".wk-card.open, .wk-card[data-qid]").forEach(ch => dropTarget(ch, () => ({ at: +ch.dataset.at, qid: ch.dataset.qid })));
   root.querySelectorAll(".wk-col").forEach(day => dropTarget(day, () => {
-    const q = dragQid && state.queue.find(x => x.qid === dragQid); if (!q) return null;
+    const q = dragQid && state.queue.find(x => x.qid === dragQid);
+    const from = q ? q.at : dragSugg && dragSugg.at; if (!from) return null;
     const dd = new Date(+day.dataset.day), best = a.count ? I.bestHourOn(a, dd.getDay()) : null;
     // dropped on a day: that day's best hour when we know it, else the same time of day
-    const t = new Date(q.at); dd.setHours(best != null ? best : t.getHours(), best != null ? naturalMinute(q.qid) : t.getMinutes(), 0, 0); return { at: dd.getTime() };
+    const t = new Date(from); dd.setHours(best != null ? best : t.getHours(), best != null ? naturalMinute((q && q.qid) || dragSugg.id) : t.getMinutes(), 0, 0); return { at: dd.getTime() };
   }));
+  root.querySelectorAll("[data-sp]").forEach(b => (b.onclick = e => { e.stopPropagation(); suggPop(b, b.dataset.sp, +b.dataset.at); }));
   root.querySelectorAll("[data-fill]").forEach(b => b.onclick = e => { e.stopPropagation(); acceptSuggestion(+b.dataset.at, b.dataset.fill); });
-  root.querySelectorAll("[data-pick]").forEach(b => b.onclick = e => { e.stopPropagation(); state.fillAt = +b.dataset.pick; state.status = "open"; go("library"); });
-  root.querySelectorAll(".wk-card:not(.open)").forEach(c => c.onclick = () => { const id = c.dataset.id; if (c.dataset.k === "posted") { const s = state.liStatus[id]; if (s?.url) return window.open(s.url, "_blank"); } if (id && state.byId.get(id)) openComposer(id); });
+  root.querySelectorAll("[data-pick]").forEach(b => b.onclick = e => { e.stopPropagation(); pickFor(+b.dataset.pick); });
+  root.querySelectorAll(".wk-card:not(.open)").forEach(c => c.onclick = e => { e.stopPropagation(); const id = c.dataset.id; if (c.dataset.k === "posted") { const s = state.liStatus[id]; if (s?.url) return window.open(s.url, "_blank"); } const q = c.dataset.qid && state.queue.find(x => x.qid === c.dataset.qid); if (q) return schedPop(c, q); if (id && state.byId.get(id)) openComposer(id); });
 }
 $("calPrev").onclick = () => {
   if (cal.mode === "week") { cal.week--; return renderCalendar(); }
@@ -1580,6 +1640,8 @@ function renderComposerStatus() {
 
 function closeComposer() {
   state.current = null;
+  if (state.view !== "library") state.fillAt = null;
+  closeWhen();
   if (state.view === "review") setTimeout(() => renderReview(true), 0);
   $("composer").hidden = true;
   $("scrim").hidden = true;
@@ -1825,25 +1887,38 @@ $("cUnqueue").onclick = async () => {
 };
 $("cSchedBtn").onclick = e => {
   e.stopPropagation();
-  if (state.fillAt) return $("cSchedule").click();
-  $("schedPop").hidden = !$("schedPop").hidden;
+  const q = queuedFor(state.current);
+  whenPop(e.currentTarget, {
+    at: state.fillAt || (q ? q.at : 0),
+    title: q ? `Scheduled ${shortWhen(q.at)}` : "Schedule on LinkedIn",
+    verb: state.fillAt ? `Schedule for this time` : q ? "Reschedule" : "Schedule",
+    onPick: at => scheduleFromComposer(at)
+  });
 };
 $("schedPop").addEventListener("click", e => e.stopPropagation());
-$("cSchedule").onclick = e =>
-  busy(e.currentTarget, "Scheduling…", async () => {
-    const at = state.fillAt || new Date($("cAt").value).getTime();
+$("cSchedule").onclick = e => busy(e.currentTarget, "Scheduling…", () => scheduleFromComposer(state.fillAt || new Date($("cAt").value).getTime()));
+// schedule (or reschedule) what's in the editor, then go back to wherever you were: never jump to another page
+async function scheduleFromComposer(at) {
+  try {
     if (!at || at < Date.now() + 30_000) throw new Error("Pick a time in the future.");
-    await send({ type: "enqueue", items: [{ ...payload(), at }] });
-    const wasFill = !!state.fillAt;
+    const q = queuedFor(state.current);
+    const item = payload();
+    if (q) {
+      const { tweetId, ...patch } = item;
+      await send({ type: "updateQueueItem", qid: q.qid, patch: { ...patch, at } });
+    } else await send({ type: "enqueue", items: [{ ...item, at }] });
+    const back = state.fillFrom;
     state.fillAt = null;
+    state.fillFrom = null;
     $("schedPop").hidden = true;
+    closeComposer();
+    if (back && state.view === "library") go(back);
     await load();
-    if (wasFill) {
-      closeComposer();
-      go("queue");
-      toast(`Scheduled for ${shortWhen(at)}`);
-    } else msg("ok", `Scheduled for ${esc(shortWhen(at))}.`, true);
-  });
+    toast(`Scheduled for ${shortWhen(at)}`);
+  } catch (err) {
+    msg("bad", err.message);
+  }
+}
 $("cMark").onclick = async () => {
   await send({ type: "markPosted", tweetId: state.current, posted: !isPosted(state.current) });
   msg();

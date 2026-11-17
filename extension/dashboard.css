@@ -424,3 +424,22 @@ body.dragging .slot-open, body.dragging .chip.open, body.dragging .cal-day:not(.
 .mo-seg .mo-pill { position: absolute; top: 3px; bottom: 3px; left: 0; border-radius: 7px; background: var(--surface); box-shadow: 0 1px 2px rgba(22,20,15,.06), 0 0 0 1px var(--line); pointer-events: none; }
 .mo-seg .mo-pill.go { transition: transform .45s cubic-bezier(.34,1.56,.64,1), width .45s cubic-bezier(.34,1.56,.64,1); }
 @media (prefers-reduced-motion: reduce) { .mo-rise, .wk-card.mo-land, .mo-word { animation: none !important; opacity: 1; filter: none; } .wk-card, .wk-list, .mo-seg .mo-pill.go { transition: none; } .wk-card:not(.open):hover { transform: none; } }
+
+/* one time picker everywhere: open slots as one tap, or any day and time */
+.whenpop { position: fixed; z-index: 60; width: 292px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); padding: 12px; display: flex; flex-direction: column; gap: 8px; animation: rise .16s cubic-bezier(.2, .8, .2, 1); }
+.whenpop .wp-h { font-weight: 600; font-size: 13px; }
+.whenpop .lbl { margin: 2px 0 -2px; }
+.wp-slots { display: flex; flex-wrap: wrap; gap: 6px; }
+.wp-chip { border: 1px solid var(--line); background: var(--surface); color: var(--text); border-radius: 999px; padding: 6px 10px; font: 500 12.5px inherit; cursor: pointer; transition: background .12s, border-color .12s; }
+.wp-chip:hover, .wp-chip:focus-visible { background: var(--hover); border-color: var(--text); outline: none; }
+.wp-row { display: grid; grid-template-columns: 1fr 104px; gap: 6px; }
+.wp-row .input { min-width: 0; }
+.wp-more { display: flex; gap: 14px; padding-top: 6px; border-top: 1px solid var(--line); }
+.wp-link { border: 0; background: none; padding: 2px 0; font: 500 12.5px inherit; color: var(--muted); cursor: pointer; }
+.wp-link:hover { color: var(--text); }
+.wp-link.danger:hover { color: #c0392b; }
+.whenpop.sheet { left: 12px; right: 12px; bottom: 12px; width: auto; }
+.whenpop.sheet .wp-chip { padding: 9px 12px; font-size: 13.5px; }
+@media (prefers-reduced-motion: reduce) { .whenpop { animation: none; } }
+.slot-open[data-sugg], .wk-card.open[data-sugg], .chip.sugg { cursor: grab; }
+.wk-sug[data-sp] { cursor: pointer; }
