@@ -307,6 +307,7 @@ document.addEventListener("click", () => { if ($("rtPop")) $("rtPop").hidden = t
 const VIEWS = ["review", "queue", "calendar", "published", "insights", "library"];
 function go(view) {
   if (view === "settings") return openSettings();
+  if (view !== state.view) state.side = null;
   state.view = view;
   if (view !== "library") state.selected.clear();
   history.replaceState(null, "", "#" + view);
@@ -334,6 +335,7 @@ function render() {
   if (state.view === "insights") renderInsights();
   renderBulk();
   if (state.current) renderComposerStatus();
+  renderSide();
 }
 
 function renderAvatar() {
@@ -923,33 +925,38 @@ $("archiveFile").onchange = async e => {
 
 // ---------- one way to pick a time, everywhere: open slots as one tap, or any day and time ----------
 function closeWhen() { const el = document.getElementById("whenPop"); if (el) el.remove(); }
-function whenPop(anchor, { at, title, verb, onPick, extra = [] }) {
-  closeWhen();
+// open slots as one tap, or any day and time
+function whenBody(at, verb) {
   const base = new Date(at && at > Date.now() ? at : Date.now() + 3600_000);
   const pad = n => String(n).padStart(2, "0");
   const slots = openSlots(21).map(sl => sl.at).filter(t => !at || Math.abs(t - at) > 60_000).slice(0, 6);
-  const el = document.createElement("div");
-  el.id = "whenPop";
-  el.className = "whenpop";
-  el.setAttribute("role", "dialog");
-  el.innerHTML = `${title ? `<div class="wp-h">${esc(title)}</div>` : ""}
-    ${slots.length ? `<div class="lbl">Open slots</div><div class="wp-slots">${slots.map(t => `<button class="wp-chip" data-t="${t}">${esc(shortWhen(t))}</button>`).join("")}</div>` : ""}
+  return `${slots.length ? `<div class="lbl">Open slots</div><div class="wp-slots">${slots.map(t => `<button class="wp-chip" data-t="${t}">${esc(shortWhen(t))}</button>`).join("")}</div>` : ""}
     <div class="lbl">${slots.length ? "Or any day and time" : "Day and time"}</div>
     <div class="wp-row"><input class="input" type="date" data-d value="${base.getFullYear()}-${pad(base.getMonth() + 1)}-${pad(base.getDate())}"><input class="input" type="time" data-tm value="${pad(base.getHours())}:${pad(base.getMinutes())}"></div>
-    <button class="btn sm primary block" data-go>${esc(verb || "Schedule")}</button>
-    ${extra.length ? `<div class="wp-more">${extra.map((x, i) => `<button class="wp-link${x.danger ? " danger" : ""}" data-x="${i}">${esc(x.label)}</button>`).join("")}</div>` : ""}`;
-  document.body.appendChild(el);
-  el.addEventListener("click", e => e.stopPropagation());
-  el.addEventListener("pointerdown", e => e.stopPropagation());
-  const done = t => { closeWhen(); onPick(t); };
-  el.querySelectorAll("[data-t]").forEach(b => (b.onclick = () => done(+b.dataset.t)));
+    <button class="btn sm primary block" data-go>${esc(verb || "Schedule")}</button>`;
+}
+function bindWhen(el, at, pick) {
+  el.querySelectorAll("[data-t]").forEach(b => (b.onclick = () => pick(+b.dataset.t)));
   el.querySelector("[data-go]").onclick = () => {
     const [y, m, d] = el.querySelector("[data-d]").value.split("-").map(Number);
     const [h, mi] = el.querySelector("[data-tm]").value.split(":").map(Number);
     const t = new Date(y, m - 1, d, h, mi).getTime();
     if (!t || t < Date.now() + 30_000) return toast("Pick a time in the future.");
-    done(t);
+    pick(t);
   };
+}
+function whenPop(anchor, { at, title, verb, onPick, extra = [] }) {
+  closeWhen();
+  const el = document.createElement("div");
+  el.id = "whenPop";
+  el.className = "whenpop";
+  el.setAttribute("role", "dialog");
+  el.innerHTML = `${title ? `<div class="wp-h">${esc(title)}</div>` : ""}${whenBody(at, verb)}
+    ${extra.length ? `<div class="wp-more">${extra.map((x, i) => `<button class="wp-link${x.danger ? " danger" : ""}" data-x="${i}">${esc(x.label)}</button>`).join("")}</div>` : ""}`;
+  document.body.appendChild(el);
+  el.addEventListener("click", e => e.stopPropagation());
+  el.addEventListener("pointerdown", e => e.stopPropagation());
+  bindWhen(el, at, t => { closeWhen(); onPick(t); });
   el.querySelectorAll("[data-x]").forEach(b => (b.onclick = () => { closeWhen(); extra[+b.dataset.x].run(); }));
   // beside what you clicked on a big screen, a sheet at the bottom on a phone
   if (innerWidth > 640 && anchor) {
@@ -996,6 +1003,69 @@ function pickFor(at) {
   state.status = "open";
   go("library");
 }
+
+// ---------- the post sheet: click a post in Calendar and it opens on the right, the calendar stays in view ----------
+state.side = null; // { id, at } for a suggestion, { qid } for a scheduled post, { posted: id }
+function openSide(sel) { state.side = sel; renderSide(); }
+function closeSide() { state.side = null; renderSide(); }
+function renderSide() {
+  let el = $("sidePost");
+  const sel = state.side;
+  const q = sel && sel.qid ? state.queue.find(x => x.qid === sel.qid) : sel && sel.id ? state.queue.find(x => x.tweetId === sel.id) : null;
+  const id = sel ? (q ? q.tweetId : sel.id || sel.posted) : null;
+  const p = id && state.byId.get(id);
+  const posted = id && state.liStatus[id]?.state === "posted" ? state.liStatus[id] : null;
+  document.querySelectorAll(".chip.picked, .wk-card.picked").forEach(x => x.classList.remove("picked"));
+  if (!sel || state.view !== "calendar" || (!p && !q && !posted)) {
+    document.body.classList.remove("has-side");
+    if (el) el.hidden = true;
+    return;
+  }
+  if (!el) {
+    el = document.createElement("aside");
+    el.id = "sidePost";
+    el.className = "side-post";
+    el.addEventListener("click", e => e.stopPropagation());
+    document.body.appendChild(el);
+  }
+  const kind = posted && !q ? "posted" : q ? "sched" : "sugg";
+  const at = q ? q.at : sel.at;
+  const text = q ? q.text : (posted && posted.text) || (p && p.text) || "";
+  const hasVid = q ? q.visual === "video" : !!(p && (threadOf(p).some(x => x.hasVideo)));
+  const imgs = q ? (q.visual === "images" ? q.images || [] : []) : (p && p.images) || [];
+  const vidFrom = q ? q.videoFrom || q.tweetId : p && ((threadOf(p).find(x => x.hasVideo) || {}).id || p.id);
+  document.querySelectorAll(kind === "sched" ? `[data-qid="${CSS.escape(q.qid)}"]` : `[data-id="${CSS.escape(id)}"][data-at="${at}"]`).forEach(x => x.classList.add("picked"));
+  const head = kind === "posted" ? `Posted ${esc(shortWhen(posted.at))}` : kind === "sched" ? `Scheduled ${esc(shortWhen(at))}` : `Suggested for ${esc(shortWhen(at))}`;
+  el.innerHTML = `
+    <div class="sp-h"><b>${head}</b><button class="icon-btn" data-sp="close" title="Close (Esc)">${icon("x")}</button></div>
+    <div class="sp-body">
+      <div class="sp-media" id="spMedia">${hasVid ? `<div class="loading"></div>` : imgs.length ? `<img src="${esc(imgs[0])}" alt="">` : ""}</div>
+      <p class="sp-text">${esc(text)}</p>
+      ${p ? `<div class="sp-meta">${fmtDate(p.createdAt)} on X · ${fmtNum(p.likes)} likes${p.views ? ` · ${fmtNum(p.views)} views` : ""} · <a href="${esc(p.url)}" target="_blank" rel="noopener">View on X</a></div>` : ""}
+      ${kind === "posted" ? (posted.url ? `<a class="btn block" href="${esc(posted.url)}" target="_blank" rel="noopener">Open on LinkedIn</a>` : "") : `<div class="sp-when" id="spWhen"></div>`}
+      ${kind === "posted" ? "" : `<div class="wp-more">${p ? `<button class="wp-link" data-sp="edit">Edit post</button>` : ""}${kind === "sched" ? `<button class="wp-link danger" data-sp="unq">Unqueue</button>` : `<button class="wp-link danger" data-sp="pass">Not for LinkedIn</button>`}</div>`}
+    </div>`;
+  XLIIcons.paint(el);
+  document.body.classList.add("has-side");
+  el.hidden = false;
+  if (kind !== "posted") {
+    $("spWhen").innerHTML = whenBody(at, kind === "sched" ? "Move here" : "Schedule");
+    bindWhen($("spWhen"), at, t => (kind === "sched" ? moveQueued(q.qid, t) : acceptSuggestion(t, id)).then(() => { state.side = { id, at: t }; renderSide(); }));
+  }
+  el.querySelectorAll("[data-sp]").forEach(b => (b.onclick = async () => {
+    const a = b.dataset.sp;
+    if (a === "close") return closeSide();
+    if (a === "edit") { if (kind === "sugg") state.fillAt = at; return openComposer(id); }
+    if (a === "unq") { await unqueue(q); return closeSide(); }
+    if (a === "pass") { await markFit(id, "personal"); return closeSide(); }
+  }));
+  if (hasVid) {
+    const m = $("spMedia"), show = v => { if (!m.isConnected) return; m.innerHTML = v && v.url ? `<video src="${esc(v.url)}"${v.poster ? ` poster="${esc(v.poster)}"` : ""} muted playsinline loop controls preload="metadata"></video>` : v && v.poster ? `<img src="${esc(v.poster)}" alt="">` : `<div class="sp-novid">Video from X</div>`; };
+    if (vidCache.has(vidFrom)) show(vidCache.get(vidFrom));
+    else send({ type: "videoPreview", tweetId: vidFrom }).then(v => { vidCache.set(vidFrom, v); show(v); }).catch(() => show(null));
+  }
+}
+document.addEventListener("keydown", e => { if (e.key === "Escape" && state.side && $("composer").hidden) closeSide(); });
 
 // ---------- queue ----------
 // open slots from now on (objects from XLISlots: {at, dayStart, w, s, e})
@@ -1445,9 +1515,10 @@ function renderCalendar() {
       const id = ch.dataset.id;
       e.stopPropagation();
       if (ch.dataset.k === "sugg" && e.target.dataset.add) return acceptSuggestion(at, id);
-      if (ch.dataset.k === "sugg") return suggPop(ch, id, at);
+      if (ch.dataset.k === "sugg") return openSide({ id, at });
       if (ch.dataset.k === "open") return pickFor(at);
-      if (ch.dataset.qid) { const q = state.queue.find(x => x.qid === ch.dataset.qid); if (q) return schedPop(ch, q); }
+      if (ch.dataset.qid) return openSide({ qid: ch.dataset.qid });
+      if (ch.dataset.k === "posted") return openSide({ posted: id });
       if (ch.dataset.k === "posted") {
         const s = state.liStatus[id];
         if (s?.url) return window.open(s.url, "_blank");
@@ -1549,10 +1620,10 @@ function renderWeek() {
     // dropped on a day: that day's best hour when we know it, else the same time of day
     const t = new Date(from); dd.setHours(best != null ? best : t.getHours(), best != null ? naturalMinute((q && q.qid) || dragSugg.id) : t.getMinutes(), 0, 0); return { at: dd.getTime() };
   }));
-  root.querySelectorAll("[data-sp]").forEach(b => (b.onclick = e => { e.stopPropagation(); suggPop(b, b.dataset.sp, +b.dataset.at); }));
+  root.querySelectorAll("[data-sp]").forEach(b => (b.onclick = e => { e.stopPropagation(); openSide({ id: b.dataset.sp, at: +b.dataset.at }); }));
   root.querySelectorAll("[data-fill]").forEach(b => b.onclick = e => { e.stopPropagation(); acceptSuggestion(+b.dataset.at, b.dataset.fill); });
   root.querySelectorAll("[data-pick]").forEach(b => b.onclick = e => { e.stopPropagation(); pickFor(+b.dataset.pick); });
-  root.querySelectorAll(".wk-card:not(.open)").forEach(c => c.onclick = e => { e.stopPropagation(); const id = c.dataset.id; if (c.dataset.k === "posted") { const s = state.liStatus[id]; if (s?.url) return window.open(s.url, "_blank"); } const q = c.dataset.qid && state.queue.find(x => x.qid === c.dataset.qid); if (q) return schedPop(c, q); if (id && state.byId.get(id)) openComposer(id); });
+  root.querySelectorAll(".wk-card:not(.open)").forEach(c => c.onclick = e => { e.stopPropagation(); const id = c.dataset.id; if (c.dataset.k === "posted") { const s = state.liStatus[id]; if (s?.url) return window.open(s.url, "_blank"); } if (c.dataset.qid) return openSide({ qid: c.dataset.qid }); if (id && state.byId.get(id)) openSide({ posted: id }); });
 }
 $("calPrev").onclick = () => {
   if (cal.mode === "week") { cal.week--; return renderCalendar(); }
