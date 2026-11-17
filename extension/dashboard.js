@@ -1043,7 +1043,7 @@ function renderSide() {
       <p class="sp-text">${esc(text)}</p>
       ${p ? `<div class="sp-meta">${fmtDate(p.createdAt)} on X · ${fmtNum(p.likes)} likes${p.views ? ` · ${fmtNum(p.views)} views` : ""} · <a href="${esc(p.url)}" target="_blank" rel="noopener">View on X</a></div>` : ""}
       ${kind === "posted" ? (posted.url ? `<a class="btn block" href="${esc(posted.url)}" target="_blank" rel="noopener">Open on LinkedIn</a>` : "") : `<div class="sp-when" id="spWhen"></div>`}
-      ${kind === "posted" ? "" : `<div class="wp-more">${p ? `<button class="wp-link" data-sp="edit">Edit post</button>` : ""}${kind === "sched" ? `<button class="wp-link danger" data-sp="unq">Unqueue</button>` : `<button class="wp-link danger" data-sp="pass">Not for LinkedIn</button>`}</div>`}
+      ${kind === "posted" ? "" : `<div class="wp-more">${p ? `<button class="wp-link" data-sp="edit">Edit post</button>` : ""}${kind === "sched" ? `<button class="wp-link danger" data-sp="unq">Unqueue</button>` : `<button class="wp-link" data-sp="skip">Skip, show another</button><button class="wp-link danger" data-sp="pass">Not for LinkedIn</button>`}</div>`}
     </div>`;
   XLIIcons.paint(el);
   document.body.classList.add("has-side");
@@ -1058,6 +1058,19 @@ function renderSide() {
     if (a === "edit") { if (kind === "sugg") state.fillAt = at; return openComposer(id); }
     if (a === "unq") { await unqueue(q); return closeSide(); }
     if (a === "pass") { await markFit(id, "personal"); return closeSide(); }
+    if (a === "skip") {
+      // skip this one: the next best post takes the same slot, and the sheet shows it
+      await passSuggestion(id);
+      const next = suggestions(120).get(at);
+      state.side = next ? { id: next.id, at } : null;
+      renderSide();
+      toastUndo(next ? "Skipped. Here's the next one." : "Skipped. Nothing else to suggest.", async () => {
+        state.skipped.delete(id);
+        await chrome.storage.local.set({ skipped: [...state.skipped] });
+        state.side = { id, at };
+        render();
+      });
+    }
   }));
   if (hasVid) {
     const m = $("spMedia"), show = v => { if (!m.isConnected) return; m.innerHTML = v && v.url ? `<video src="${esc(v.url)}"${v.poster ? ` poster="${esc(v.poster)}"` : ""} muted playsinline loop controls preload="metadata"></video>` : v && v.poster ? `<img src="${esc(v.poster)}" alt="">` : `<div class="sp-novid">Video from X</div>`; };
